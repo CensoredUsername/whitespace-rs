@@ -138,6 +138,16 @@ fn parse_args() -> Result<Args, String> {;
                 } else {
                     action = Action::Translate;
                 },
+                "-h" | "--help" => return Err("Usage: whitespacers INPUT [-h | -i INFILE | -o OUTFILE | -t | -f FORMAT]
+
+Options:
+    -h --help            Display this message
+    -i --input  INFILE   File to read input from (defaults to stdin)
+    -o --output OUTFILE  File to write output to (defaults to stdout)
+    -f --format FORMAT   Input file format. Supported options are [whitespace|ws|assembly|asm],
+                          the default is whitespace.
+    -t --translate       Translate the file from whitespace to assembly (or in reverse).
+".to_string()),
                 "--" => {
                     pos_args.extend(args);
                     break;
