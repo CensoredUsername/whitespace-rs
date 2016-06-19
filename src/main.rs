@@ -57,9 +57,13 @@ fn console_main() -> Result<(), String> {
     });
 
     let mut output: Box<Write> = if let Some(path) = args.output {
-        Box::new(try!(File::create(&path).map_err(|e| e.to_string())))
+        Box::new(io::BufWriter::new(
+            try!(File::create(&path).map_err(|e| e.to_string()))
+        ))
     } else {
-        Box::new(io::stdout())
+        Box::new(io::BufWriter::new(
+            io::stdout()
+        ))
     };
 
     match args.action {
