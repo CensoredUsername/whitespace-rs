@@ -70,7 +70,7 @@ fn console_main() -> Result<(), String> {
         Action::Translate => try!(
             match args.format {
                 FileFormat::Whitespace => output.write_all(program.disassemble().as_bytes()),
-                FileFormat::Assembly   => output.write_all(program.dump().as_slice())
+                FileFormat::Assembly   => output.write_all(program.dump(true).as_slice())
             }.map_err(|e| e.to_string())
         ),
         Action::Execute => {

@@ -269,7 +269,7 @@ impl<'a> Program<'a> {
                 match command.source {
                     // we unwrap here as for the program structure there should always be a known label in a loc if the type is a label
                     Some(ref loc) => match index_map.entry(loc.label.as_ref().unwrap()) {
-                        Occupied(_) => return Err(format!("Duplicate label {:?}", &loc.label)),
+                        Occupied(_) => return Err(format!("Duplicate label {}", loc.label.as_ref().unwrap())),
                         Vacant(e)   => e.insert(index)
                     },
                     None => return Err("This program has been stripped".to_string())

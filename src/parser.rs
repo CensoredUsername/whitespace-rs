@@ -179,40 +179,40 @@ impl<'a> Program<'a> {
         Ok(program)
     }
 
-    pub fn dump(&self) -> Vec<u8> {
-        if let Some(source) = self.source {
+    pub fn dump(&self, reconstruct: bool) -> Vec<u8> {
+        if let (false, Some(source)) = (reconstruct, self.source) {
             Vec::from(source)
         } else {
             let mut buffer = Vec::<u8>::new();
-            for command in self.commands.iter() {
-                if let Some(ref loc) = command.source {
+            for (index, command) in self.commands.iter().enumerate() {
+                if let (false, &Some(ref loc)) = (reconstruct, &command.source) {
                     buffer.extend(loc.text);
                 } else {
-                    let (command, arg): (&[u8], Option<&[u8]>) = match command.data { // todo: command decoding
-                        CommandType::Push {..}          => (b"  ", None),
-                        CommandType::Duplicate          => (b" \n ", None),
-                        CommandType::Copy {..}          => (b" \t ", None),
-                        CommandType::Swap               => (b" \n\t", None),
-                        CommandType::Discard            => (b" \n\n", None),
-                        CommandType::Slide {..}         => (b" \t\n", None),
-                        CommandType::Add                => (b"\t   ", None),
-                        CommandType::Subtract           => (b"\t  \t", None),
-                        CommandType::Multiply           => (b"\t  \n", None),
-                        CommandType::Divide             => (b"\t \t ", None),
-                        CommandType::Modulo             => (b"\t \t\t", None),
-                        CommandType::Set                => (b"\t\t ", None),
-                        CommandType::Get                => (b"\t\t\t", None),
-                        CommandType::Label              => (b"\n  ", None),
-                        CommandType::Call {..}          => (b"\n \t", None),
-                        CommandType::Jump {..}          => (b"\n \n", None),
-                        CommandType::JumpIfZero {..}    => (b"\n\t ", None),
-                        CommandType::JumpIfNegative {..}=> (b"\n\t\t", None),
-                        CommandType::EndSubroutine      => (b"\n\t\n", None),
-                        CommandType::EndProgram         => (b"\n\n\n", None),
-                        CommandType::PrintChar          => (b"\t\n  ", None),
-                        CommandType::PrintNum           => (b"\t\n \t", None),
-                        CommandType::InputChar          => (b"\t\n\t ", None),
-                        CommandType::InputNum           => (b"\t\n\t\t", None),
+                    let (command, arg): (&[u8], Option<Vec<u8>>) = match command.data { // todo: command decoding
+                        CommandType::Push {value}               => (b"  ", Some(number_to_ws(value))),
+                        CommandType::Duplicate                  => (b" \n ", None),
+                        CommandType::Copy {index}               => (b" \t ", Some(number_to_ws(index as isize))),
+                        CommandType::Swap                       => (b" \n\t", None),
+                        CommandType::Discard                    => (b" \n\n", None),
+                        CommandType::Slide {amount}             => (b" \t\n", Some(number_to_ws(amount as isize))),
+                        CommandType::Add                        => (b"\t   ", None),
+                        CommandType::Subtract                   => (b"\t  \t", None),
+                        CommandType::Multiply                   => (b"\t  \n", None),
+                        CommandType::Divide                     => (b"\t \t ", None),
+                        CommandType::Modulo                     => (b"\t \t\t", None),
+                        CommandType::Set                        => (b"\t\t ", None),
+                        CommandType::Get                        => (b"\t\t\t", None),
+                        CommandType::Label                      => (b"\n  ", Some(label_to_ws(index, &command.source))),
+                        CommandType::Call {ref index}           => (b"\n \t", Some(label_to_ws(index.get() - 1, &command.source))),
+                        CommandType::Jump {ref index}           => (b"\n \n", Some(label_to_ws(index.get() - 1, &command.source))),
+                        CommandType::JumpIfZero {ref index}     => (b"\n\t ", Some(label_to_ws(index.get() - 1, &command.source))),
+                        CommandType::JumpIfNegative {ref index} => (b"\n\t\t", Some(label_to_ws(index.get() - 1, &command.source))),
+                        CommandType::EndSubroutine              => (b"\n\t\n", None),
+                        CommandType::EndProgram                 => (b"\n\n\n", None),
+                        CommandType::PrintChar                  => (b"\t\n  ", None),
+                        CommandType::PrintNum                   => (b"\t\n \t", None),
+                        CommandType::InputChar                  => (b"\t\n\t ", None),
+                        CommandType::InputNum                   => (b"\t\n\t\t", None),
                     };
                     buffer.extend(command);
                     if let Some(arg) = arg {
@@ -223,4 +223,44 @@ impl<'a> Program<'a> {
             buffer
         }
     }
+}
+
+use std::mem::size_of;
+
+fn number_to_ws(mut n: isize) -> Vec<u8> {
+    let mut res = Vec::new();
+    if n < 0 {
+        n = -n;
+        res.push(b'\t');
+    } else if n > 0{
+        res.push(b' ');
+    }
+
+    let n = n as usize;
+    let mut i = size_of::<usize>() * 8;
+    let mut force = false;
+    while i != 0 {
+        i -= 1;
+        if (n & (1 << i)) != 0 {
+            force = true;
+            res.push(b'\t');
+        } else if force {
+            res.push(b' ');
+        }
+    }
+    res.push(b'\n');
+    res
+}
+
+fn label_to_ws(i: usize, l: &Option<Box<SourceLoc>>) -> Vec<u8> {
+    let label;
+    let l: &Label = if let &Some(ref loc) = l {
+        loc.label.as_ref().unwrap()
+    } else {
+        label = i.to_string().as_bytes().into();
+        &label
+    };
+    let mut res = l.into_iter().map(|i| if i {b'\t'} else {b' '}).collect::<Vec<u8>>();
+    res.push(b'\n');
+    res
 }

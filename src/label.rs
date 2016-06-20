@@ -62,7 +62,8 @@ impl Label {
 impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.bits == 0 {
-            if let Ok(s) = str::from_utf8(&self.buffer) {
+            let len = self.buffer.len() - 1;
+            if let Ok(s) = str::from_utf8(&self.buffer[..len]) {
                 return f.write_str(s);
             }
         }
@@ -76,7 +77,9 @@ impl fmt::Display for Label {
 
 impl<'a> From<&'a [u8]> for Label {
     fn from(buffer: &[u8]) -> Label {
-        Label {bits: 0, buffer: buffer.into()}
+        let mut buffer = Vec::from(buffer);
+        buffer.push(0);
+        Label {bits: 0, buffer: buffer}
     }
 }
 
