@@ -63,7 +63,7 @@ pub enum CommandType {
     PrintChar,
     PrintNum,
     InputChar,
-    InputNum        
+    InputNum
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -98,16 +98,6 @@ impl<'a> Interpreter<'a> {
             i += 1;
         }
         Ok(i)
-    }
-
-    pub fn debug(&mut self) -> Result<(), String> {
-        while let InterpreterState::Ready = self.state.get() {
-            if let Some(instruction) = self.program.commands.get(self.instruction_counter) {
-                println!("{}: {:?}\n{:?}\n{:?}\n{:?}", self.instruction_counter, instruction, self.stack, self.heap, self.callstack);
-            }
-            try!(self.step());
-        }
-        Ok(())
     }
 
     fn error(&self, s: &str) -> Result<(), String> {
@@ -261,7 +251,7 @@ impl<'a> Interpreter<'a> {
 }
 
 impl<'a> Program<'a> {
-    pub fn compile(&mut self) -> Result<(), String>{
+    pub fn compile(&mut self) -> Result<(), String> {
         let mut index_map = HashMap::<&Label, usize>::new();
 
         for (index, command) in self.commands.iter().enumerate() {

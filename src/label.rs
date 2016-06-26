@@ -21,7 +21,11 @@ impl Label {
     }
 
     pub fn len(&self) -> usize {
-        return self.buffer.len() * 8 - 8 + self.bits as usize
+        let len = self.buffer.len();
+        if len == 0 {
+            return 0;
+        }
+        return len * 8 - 8 + self.bits as usize
     }
 
     pub fn push(&mut self, val: bool) {
@@ -61,9 +65,9 @@ impl Label {
 
 impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.bits == 0 {
-            let len = self.buffer.len() - 1;
-            if let Ok(s) = str::from_utf8(&self.buffer[..len]) {
+        let len = self.buffer.len();
+        if self.bits == 0 && len > 0 {
+            if let Ok(s) = str::from_utf8(&self.buffer[..len - 1]) {
                 return f.write_str(s);
             }
         }

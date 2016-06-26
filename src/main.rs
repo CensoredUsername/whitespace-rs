@@ -7,6 +7,8 @@ mod label;
 mod parser;
 mod interpreter;
 mod assembler;
+#[cfg(target_arch = "x86_64")]
+mod jit;
 use interpreter::{Interpreter, Program};
 
 #[derive(Debug, Clone)]
@@ -27,7 +29,8 @@ enum FileFormat {
 #[derive(Debug, Clone)]
 enum Action {
     Translate,
-    Execute
+    Execute,
+    Jit
 }
 
 fn main() {
@@ -73,7 +76,7 @@ fn console_main() -> Result<(), String> {
                 FileFormat::Assembly   => output.write_all(program.dump(true).as_slice())
             }.map_err(|e| e.to_string())
         ),
-        Action::Execute => {
+        _ => {
             let input: Box<BufRead> = if let Some(path) = args.input {
                 Box::new(io::BufReader::new(
                     try!(File::open(&path).map_err(|e| e.to_string()))
@@ -84,7 +87,11 @@ fn console_main() -> Result<(), String> {
                 ))
             };
             let mut interpreter = Interpreter::new(program, input, output);
-            try!(interpreter.run());
+            match args.action {
+                    Action::Execute => { try!(interpreter.run()); },
+                    Action::Jit     => { try!(interpreter.jit()); },
+                    _ => unreachable!()
+            };
         }
     }
     Ok(())
@@ -133,12 +140,17 @@ fn parse_args() -> Result<Args, String> {;
                         f => return Err(format!("Unrecognized input format {}", f))
                     };
                 },
-                "-t" | "--translate" => if let Action::Translate = action {
-                    return Err("Option --translate was specified twice".to_string())
-                } else {
+                "-t" | "--translate" => if let Action::Execute = action {
                     action = Action::Translate;
+                } else {
+                    return Err("Option --translate or --jit was specified twice".to_string())
                 },
-                "-h" | "--help" => return Err("Usage: whitespacers INPUT [-h | -i INFILE | -o OUTFILE | -t | -f FORMAT]
+                "-j" | "--jit" => if let Action::Execute = action {
+                    action = Action::Jit;
+                } else {
+                    return Err("Option --translate or --jit was specified twice".to_string());
+                },
+                "-h" | "--help" => return Err("Usage: whitespacers INPUT [-h | -i INFILE | -o OUTFILE | [-t | -j] | -f FORMAT]
 
 Options:
     -h --help            Display this message
@@ -147,6 +159,7 @@ Options:
     -f --format FORMAT   Input file format. Supported options are [whitespace|ws|assembly|asm],
                           the default is whitespace.
     -t --translate       Translate the file from whitespace to assembly (or in reverse).
+    -j --jit             Execute the file using a jit compiler.
 ".to_string()),
                 "--" => {
                     pos_args.extend(args);

@@ -83,6 +83,7 @@ impl<'a> ParseState<'a> {
 
 impl<'a> Program<'a> {
     pub fn parse (code: &[u8]) -> Result<Program, String> {
+
         let mut commands = Vec::<Command>::new();
         let mut state = ParseState::new(code);
 
@@ -175,7 +176,9 @@ impl<'a> Program<'a> {
         }
 
         let mut program = Program {source: Some(code), commands: commands};
+
         try!(program.compile());
+
         Ok(program)
     }
 

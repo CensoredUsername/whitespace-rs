@@ -4,4 +4,9 @@ name = "whitespacers"
 version = "0.0.1"
 authors = [ "CensoredUsername cens.username@gmail.com" ]
 
-[dependencies]
+[target.x86_64-pc-windows-msvc.dependencies]
+winapi = "0.2.7"
+kernel32-sys = "0.2.2"
+
+[target.x86_64-unknown-linux-gnu.dependencies]
+libc = "0.2.12"

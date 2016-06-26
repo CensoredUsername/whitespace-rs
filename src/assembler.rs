@@ -127,6 +127,7 @@ impl<'a> Iterator for TokenizerState<'a> {
             self.item = Some(c);
             Some(c)
         } else {
+            self.index += 1;
             self.item = None;
             None
         }
