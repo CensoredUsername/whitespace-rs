@@ -1,60 +1,62 @@
 use std::str;
 use std::fmt;
-use std::cell::Cell;
+use std::rc::Rc;
 
-use interpreter::{Program, Command, CommandType, Integer, SourceLoc};
+use interpreter::{Program, Command, Integer, SourceLoc};
 
 impl<'a> Program<'a> {
     pub fn disassemble(&self) -> String {
+        use interpreter::Command::*;
+
         let mut buffer = String::new();
         for (index, command) in self.commands.iter().enumerate() {
-            buffer.push_str(match command.data {
-                CommandType::Push {..} =>           "    push  ",
-                CommandType::Duplicate =>           "    dup",
-                CommandType::Copy {..} =>           "    copy  ",
-                CommandType::Swap =>                "    swap",
-                CommandType::Discard =>             "    pop",
-                CommandType::Slide {..} =>          "    slide ",
-                CommandType::Add =>                 "    add",
-                CommandType::Subtract =>            "    sub",
-                CommandType::Multiply =>            "    mul",
-                CommandType::Divide =>              "    div",
-                CommandType::Modulo =>              "    mod",
-                CommandType::Set =>                 "    set",
-                CommandType::Get =>                 "    get",
-                CommandType::Label =>               "",
-                CommandType::Call {..} =>           "    call  ",
-                CommandType::Jump {..} =>           "    jmp   ",
-                CommandType::JumpIfZero {..} =>     "    jz    ",
-                CommandType::JumpIfNegative {..} => "    jn    ",
-                CommandType::EndSubroutine =>       "    ret",
-                CommandType::EndProgram =>          "    exit",
-                CommandType::PrintChar =>           "    pchr",
-                CommandType::PrintNum =>            "    pnum",
-                CommandType::InputChar =>           "    ichr",
-                CommandType::InputNum =>            "    inum",
+            buffer.push_str(match *command {
+                Push {..} =>           "    push  ",
+                Duplicate =>           "    dup",
+                Copy {..} =>           "    copy  ",
+                Swap =>                "    swap",
+                Discard =>             "    pop",
+                Slide {..} =>          "    slide ",
+                Add =>                 "    add",
+                Subtract =>            "    sub",
+                Multiply =>            "    mul",
+                Divide =>              "    div",
+                Modulo =>              "    mod",
+                Set =>                 "    set",
+                Get =>                 "    get",
+                Label =>               "",
+                Call {..} =>           "    call  ",
+                Jump {..} =>           "    jmp   ",
+                JumpIfZero {..} =>     "    jz    ",
+                JumpIfNegative {..} => "    jn    ",
+                EndSubroutine =>       "    ret",
+                EndProgram =>          "    exit",
+                PrintChar =>           "    pchr",
+                PrintNum =>            "    pnum",
+                InputChar =>           "    ichr",
+                InputNum =>            "    inum",
             });
-            if let CommandType::Label = command.data {
-                buffer.push_str(&if let Some(ref source) = command.source {
-                    let label = source.label.as_ref().unwrap();
+            if let Label = *command {
+                buffer.push_str(&if let Some(ref locs) = self.locs {
+                    let label = locs[index].label.as_ref().unwrap();
                     format!("{}:", label)
                 } else {
                     format!("{:>04}:", index)
                 });
             }
-            match command.data {
-                CommandType::Push {value: x} => buffer.push_str(&format!("{}\n", x)),
-                CommandType::Copy {index: x} => buffer.push_str(&format!("{}\n", x)),
-                CommandType::Slide {amount: x} => buffer.push_str(&format!("{}\n", x)),
-                CommandType::Call {index: ref x} |
-                CommandType::Jump {index: ref x} |
-                CommandType::JumpIfZero {index: ref x} |
-                CommandType::JumpIfNegative {index: ref x} => buffer.push_str(
-                    &if let Some(ref source) = command.source {
-                        let label = source.label.as_ref().unwrap();
+            match *command {
+                Push {value: x} => buffer.push_str(&format!("{}\n", x)),
+                Copy {index: x} => buffer.push_str(&format!("{}\n", x)),
+                Slide {amount: x} => buffer.push_str(&format!("{}\n", x)),
+                Call {index: x} |
+                Jump {index: x} |
+                JumpIfZero {index: x} |
+                JumpIfNegative {index: x} => buffer.push_str(
+                    &if let Some(ref locs) = self.locs {
+                        let label = locs[index].label.as_ref().unwrap();
                         format!("{}\n", label)
                     } else {
-                        format!("{:>04}\n", x.get())
+                        format!("{:>04}\n", x)
                     }),
                 _ => buffer.push_str("\n")
             };
@@ -66,10 +68,11 @@ impl<'a> Program<'a> {
         // this is a bit more complex parser, we can't parse it in one go, need to tokenize
         let tokens = try!(TokenizerState::tokenize(source));
         let node = try!(parse(&tokens));
-        let commands = try!(compile(node));
+        let (commands, locs) = try!(compile(node));
         let mut program = Program {
             source: Some(source.as_bytes()),
-            commands: commands
+            commands: commands,
+            locs: Some(locs)
         };
         try!(program.compile());
         Ok(program)
@@ -435,29 +438,30 @@ fn validate_args(name: &str, args: &[Node], nargs: usize) -> Result<(), String> 
     }
 }
 
-fn compile<'a>(root: Node<'a>) -> Result<Vec<Command<'a>>, String> {
+fn compile<'a>(root: Node<'a>) -> Result<(Vec<Command>, Vec<SourceLoc>), String> {
     let nodes = match root {
         Node {data: NodeType::Root {nodes}, ..} => nodes,
         _ => panic!("Called compile on non-root node")
     };
 
-
-    nodes.iter().map(|node| {
+    let mut commands = Vec::new();
+    let mut locs = Vec::new();
+    for node in &nodes {
         let mut label = None;
-        let data = match node.data {
+        let command = match node.data {
             NodeType::Label {name} => {
                 let name = name.as_bytes();
                 label = Some(name.into());
-                CommandType::Label
+                Command::Label
             },
             NodeType::Op {name, ref args} => match name {
                 "push" => {
                     try!(validate_args(name, args, 1));
-                    CommandType::Push {value: validate_type!(NodeType::Integer {value} => value, args[0])}
+                    Command::Push {value: validate_type!(NodeType::Integer {value} => value, args[0])}
                 },
                 "dup"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Duplicate
+                    Command::Duplicate
                 },
                 "copy" => {
                     try!(validate_args(name, args, 1));
@@ -465,15 +469,15 @@ fn compile<'a>(root: Node<'a>) -> Result<Vec<Command<'a>>, String> {
                     if value < 0 {
                         return Err(format!("Negative copy argument: {}", value))
                     }
-                    CommandType::Copy {index: value as usize}
+                    Command::Copy {index: value as usize}
                 },
                 "swap" => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Swap
+                    Command::Swap
                 },
                 "pop"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Discard
+                    Command::Discard
                 },
                 "slide" => {
                     try!(validate_args(name, args, 1));
@@ -481,104 +485,103 @@ fn compile<'a>(root: Node<'a>) -> Result<Vec<Command<'a>>, String> {
                     if value < 0 {
                         return Err(format!("Negative slide argument: {}", value))
                     }
-                    CommandType::Slide {amount: value as usize}
+                    Command::Slide {amount: value as usize}
                 },
                 "add"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Add
+                    Command::Add
                 },
                 "sub"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Subtract
+                    Command::Subtract
                 },
                 "mul"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Multiply
+                    Command::Multiply
                 },
                 "div"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Divide
+                    Command::Divide
                 },
                 "mod"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Modulo
+                    Command::Modulo
                 },
                 "set"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Set
+                    Command::Set
                 },
                 "get"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::Get
+                    Command::Get
                 },
                 "lbl"  => {
                     try!(validate_args(name, args, 1));
                     let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
                     label = Some(name.into());
-                    CommandType::Label
+                    Command::Label
                 },
                 "call" => {
                     try!(validate_args(name, args, 1));
                     let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
                     label = Some(name.into());
-                    CommandType::Call {index: Cell::new(0)}
+                    Command::Call {index: 0}
                 },
                 "jmp"  => {
                     try!(validate_args(name, args, 1));
                     let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
                     label = Some(name.into());
-                    CommandType::Jump {index: Cell::new(0)}
+                    Command::Jump {index: 0}
                 },
                 "jz"   => {
                     try!(validate_args(name, args, 1));
                     let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
                     label = Some(name.into());
-                    CommandType::JumpIfZero {index: Cell::new(0)}
+                    Command::JumpIfZero {index: 0}
                 },
                 "jn"   => {
                     try!(validate_args(name, args, 1));
                     let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
                     label = Some(name.into());
-                    CommandType::JumpIfNegative {index: Cell::new(0)}
+                    Command::JumpIfNegative {index: 0}
                 },
                 "ret"  => {
                     try!(validate_args(name, args, 0));
-                    CommandType::EndSubroutine
+                    Command::EndSubroutine
                 },
                 "exit" => {
                     try!(validate_args(name, args, 0));
-                    CommandType::EndProgram
+                    Command::EndProgram
                 },
                 "pchr" => {
                     try!(validate_args(name, args, 0));
-                    CommandType::PrintChar
+                    Command::PrintChar
                 },
                 "pnum" => {
                     try!(validate_args(name, args, 0));
-                    CommandType::PrintNum
+                    Command::PrintNum
                 },
                 "ichr" => {
                     try!(validate_args(name, args, 0));
-                    CommandType::InputChar
+                    Command::InputChar
                 },
                 "inum" => {
                     try!(validate_args(name, args, 0));
-                    CommandType::InputNum
+                    Command::InputNum
                 },
                 op     => return Err(format!("Unrecognized opcode {}", op))
             },
             _ => unreachable!()
         };
-        Ok(Command {
-            data: data,
-            source: Some(Box::new(SourceLoc {
-                line: node.loc.line,
-                column: node.loc.column,
-                text: node.loc.text.as_bytes(),
-                label: label
-            }))
-        })
-    }).collect()
+        commands.push(command);
+        locs.push(SourceLoc {
+            line: node.loc.line,
+            column: node.loc.column,
+            text: node.loc.text.as_bytes(),
+            label: label.map(Rc::new)
+        });
+    }
+    Ok((commands, locs))
 }
 
 /**
@@ -587,8 +590,6 @@ fn compile<'a>(root: Node<'a>) -> Result<Vec<Command<'a>>, String> {
 
 impl<'a> fmt::Display for TextLoc<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::fmt::Write;
-
         try!(write!(f, "line {}, column {}: ", self.line, self.column));
         f.write_str(self.text)
     }

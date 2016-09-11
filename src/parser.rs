@@ -1,7 +1,5 @@
-use std::cell::Cell;
-
 use label::Label;
-use interpreter::{Program, Command, CommandType, Integer, SourceLoc};
+use interpreter::{Program, Command, Integer, SourceLoc};
 
 #[derive(Debug, Clone)]
 struct ParseState<'a> {
@@ -85,6 +83,7 @@ impl<'a> Program<'a> {
     pub fn parse (code: &[u8]) -> Result<Program, String> {
 
         let mut commands = Vec::<Command>::new();
+        let mut sourcelocs = Vec::<SourceLoc>::new();
         let mut state = ParseState::new(code);
 
         let mut hash = 0;
@@ -110,35 +109,35 @@ impl<'a> Program<'a> {
 
             hash_length += 1;
 
-            let command_type = match (hash_length, hash) {
-                (2, 0)  => CommandType::Push {value: try!(state.parse_arg())},
-                (3, 6)  => CommandType::Duplicate,
-                (3, 3)  => CommandType::Copy {index: try!(state.parse_arg()) as usize},
-                (3, 7)  => CommandType::Swap,
-                (3, 8)  => CommandType::Discard,
-                (3, 5)  => CommandType::Slide {amount: try!(state.parse_arg()) as usize},
+            let command = match (hash_length, hash) {
+                (2, 0)  => Command::Push {value: try!(state.parse_arg())},
+                (3, 6)  => Command::Duplicate,
+                (3, 3)  => Command::Copy {index: try!(state.parse_arg()) as usize},
+                (3, 7)  => Command::Swap,
+                (3, 8)  => Command::Discard,
+                (3, 5)  => Command::Slide {amount: try!(state.parse_arg()) as usize},
 
-                (4, 27) => CommandType::Add,
-                (4, 28) => CommandType::Subtract,
-                (4, 29) => CommandType::Multiply,
-                (4, 30) => CommandType::Divide,
-                (4, 31) => CommandType::Modulo,
+                (4, 27) => Command::Add,
+                (4, 28) => Command::Subtract,
+                (4, 29) => Command::Multiply,
+                (4, 30) => Command::Divide,
+                (4, 31) => Command::Modulo,
 
-                (3, 12) => CommandType::Set,
-                (3, 13) => CommandType::Get,
+                (3, 12) => Command::Set,
+                (3, 13) => Command::Get,
 
-                (3, 18) => CommandType::Label,
-                (3, 19) => CommandType::Call {index: Cell::new(0)},
-                (3, 20) => CommandType::Jump {index: Cell::new(0)},
-                (3, 21) => CommandType::JumpIfZero {index: Cell::new(0)},
-                (3, 22) => CommandType::JumpIfNegative {index: Cell::new(0)},
-                (3, 23) => CommandType::EndSubroutine,
-                (3, 26) => CommandType::EndProgram,
+                (3, 18) => Command::Label,
+                (3, 19) => Command::Call {index: 0},
+                (3, 20) => Command::Jump {index: 0},
+                (3, 21) => Command::JumpIfZero {index: 0},
+                (3, 22) => Command::JumpIfNegative {index: 0},
+                (3, 23) => Command::EndSubroutine,
+                (3, 26) => Command::EndProgram,
 
-                (4, 45) => CommandType::PrintChar,
-                (4, 46) => CommandType::PrintNum,
-                (4, 48) => CommandType::InputChar,
-                (4, 49) => CommandType::InputNum,
+                (4, 45) => Command::PrintChar,
+                (4, 46) => Command::PrintNum,
+                (4, 48) => Command::InputChar,
+                (4, 49) => Command::InputNum,
 
                 (3, 4) | 
                 (3, 11) | 
@@ -154,20 +153,18 @@ impl<'a> Program<'a> {
             hash = 0;
             hash_length = 0;
 
-            let label = match command_type {
-                CommandType::Label | CommandType::Call {..} | CommandType::Jump {..} |
-                CommandType::JumpIfZero {..} | CommandType::JumpIfNegative {..} => Some(try!(state.parse_label())),
+            let label = match command {
+                Command::Label | Command::Call {..} | Command::Jump {..} |
+                Command::JumpIfZero {..} | Command::JumpIfNegative {..} => Some(try!(state.parse_label()).into()),
                 _ => None
             };
 
-            commands.push(Command {
-                data: command_type,
-                source: Some(Box::new(SourceLoc {
-                    line: startline,
-                    column: startcolumn,
-                    text: &code[startindex .. state.index + 1],
-                    label: label
-                }))
+            commands.push(command);
+            sourcelocs.push(SourceLoc {
+                line: startline,
+                column: startcolumn,
+                text: &code[startindex .. state.index + 1],
+                label: label
             });
         }
 
@@ -175,7 +172,11 @@ impl<'a> Program<'a> {
             return Err("Hit EOF while parsing command".to_string());
         }
 
-        let mut program = Program {source: Some(code), commands: commands};
+        let mut program = Program {
+            source: Some(code),
+            commands: commands,
+            locs: Some(sourcelocs)
+        };
 
         try!(program.compile());
 
@@ -187,40 +188,45 @@ impl<'a> Program<'a> {
             Vec::from(source)
         } else {
             let mut buffer = Vec::<u8>::new();
-            for (index, command) in self.commands.iter().enumerate() {
-                if let (false, &Some(ref loc)) = (reconstruct, &command.source) {
-                    buffer.extend(loc.text);
-                } else {
-                    let (command, arg): (&[u8], Option<Vec<u8>>) = match command.data { // todo: command decoding
-                        CommandType::Push {value}               => (b"  ", Some(number_to_ws(value))),
-                        CommandType::Duplicate                  => (b" \n ", None),
-                        CommandType::Copy {index}               => (b" \t ", Some(number_to_ws(index as isize))),
-                        CommandType::Swap                       => (b" \n\t", None),
-                        CommandType::Discard                    => (b" \n\n", None),
-                        CommandType::Slide {amount}             => (b" \t\n", Some(number_to_ws(amount as isize))),
-                        CommandType::Add                        => (b"\t   ", None),
-                        CommandType::Subtract                   => (b"\t  \t", None),
-                        CommandType::Multiply                   => (b"\t  \n", None),
-                        CommandType::Divide                     => (b"\t \t ", None),
-                        CommandType::Modulo                     => (b"\t \t\t", None),
-                        CommandType::Set                        => (b"\t\t ", None),
-                        CommandType::Get                        => (b"\t\t\t", None),
-                        CommandType::Label                      => (b"\n  ", Some(label_to_ws(index, &command.source))),
-                        CommandType::Call {ref index}           => (b"\n \t", Some(label_to_ws(index.get() - 1, &command.source))),
-                        CommandType::Jump {ref index}           => (b"\n \n", Some(label_to_ws(index.get() - 1, &command.source))),
-                        CommandType::JumpIfZero {ref index}     => (b"\n\t ", Some(label_to_ws(index.get() - 1, &command.source))),
-                        CommandType::JumpIfNegative {ref index} => (b"\n\t\t", Some(label_to_ws(index.get() - 1, &command.source))),
-                        CommandType::EndSubroutine              => (b"\n\t\n", None),
-                        CommandType::EndProgram                 => (b"\n\n\n", None),
-                        CommandType::PrintChar                  => (b"\t\n  ", None),
-                        CommandType::PrintNum                   => (b"\t\n \t", None),
-                        CommandType::InputChar                  => (b"\t\n\t ", None),
-                        CommandType::InputNum                   => (b"\t\n\t\t", None),
-                    };
-                    buffer.extend(command);
-                    if let Some(arg) = arg {
-                        buffer.extend(arg);
+            if !reconstruct {
+                if let Some(ref locs) = self.locs {
+                    for loc in locs {
+                        buffer.extend(loc.text);
                     }
+                    return buffer;
+                }
+            }
+            use interpreter::Command::*;
+            for (index, command) in self.commands.iter().enumerate() {
+                let (code, arg): (&[u8], _) = match *command {
+                    Push {value}           => (b"  ", Some(number_to_ws(value))),
+                    Duplicate              => (b" \n ", None),
+                    Copy {index}           => (b" \t ", Some(number_to_ws(index as isize))),
+                    Swap                   => (b" \n\t", None),
+                    Discard                => (b" \n\n", None),
+                    Slide {amount}         => (b" \t\n", Some(number_to_ws(amount as isize))),
+                    Add                    => (b"\t   ", None),
+                    Subtract               => (b"\t  \t", None),
+                    Multiply               => (b"\t  \n", None),
+                    Divide                 => (b"\t \t ", None),
+                    Modulo                 => (b"\t \t\t", None),
+                    Set                    => (b"\t\t ", None),
+                    Get                    => (b"\t\t\t", None),
+                    Label                  => (b"\n  ", Some(label_to_ws(index))),
+                    Call {index}           => (b"\n \t", Some(label_to_ws(index - 1))),
+                    Jump {index}           => (b"\n \n", Some(label_to_ws(index - 1))),
+                    JumpIfZero {index}     => (b"\n\t ", Some(label_to_ws(index - 1))),
+                    JumpIfNegative {index} => (b"\n\t\t", Some(label_to_ws(index - 1))),
+                    EndSubroutine          => (b"\n\t\n", None),
+                    EndProgram             => (b"\n\n\n", None),
+                    PrintChar              => (b"\t\n  ", None),
+                    PrintNum               => (b"\t\n \t", None),
+                    InputChar              => (b"\t\n\t ", None),
+                    InputNum               => (b"\t\n\t\t", None),
+                };
+                buffer.extend(code);
+                if let Some(arg) = arg {
+                    buffer.extend(arg);
                 }
             }
             buffer
@@ -255,15 +261,11 @@ fn number_to_ws(mut n: isize) -> Vec<u8> {
     res
 }
 
-fn label_to_ws(i: usize, l: &Option<Box<SourceLoc>>) -> Vec<u8> {
-    let label;
-    let l: &Label = if let &Some(ref loc) = l {
-        loc.label.as_ref().unwrap()
-    } else {
-        label = i.to_string().as_bytes().into();
-        &label
-    };
-    let mut res = l.into_iter().map(|i| if i {b'\t'} else {b' '}).collect::<Vec<u8>>();
+fn label_to_ws(i: usize) -> Vec<u8> {
+    let label: Label = i.to_string().as_bytes().into();
+    let mut res: Vec<u8> = (&label).into_iter()
+                                   .map(|i| if i {b'\t'} else {b' '})
+                                   .collect();
     res.push(b'\n');
     res
 }
