@@ -3,6 +3,7 @@
 extern crate dynasmrt;
 extern crate itertools;
 extern crate crossbeam;
+extern crate fnv;
 
 use std::io::{BufRead, Read, Write, self};
 use std::fs::File;
@@ -115,7 +116,7 @@ fn console_main() -> Result<(), String> {
             match args.action {
                 Action::Execute => {
                     let mut interpreter = Interpreter::new(program, input, output);
-                    try!(interpreter.run());
+                    println!("ran {} items", try!(interpreter.run()));
                 },
                 Action::Jit(strategy) => {
                     let mut jitinterpreter = jit::JitInterpreter::new(&program.commands, input, output);

@@ -1,5 +1,6 @@
 use dynasmrt::{self, DynasmApi, DynasmLabelApi, AssemblyOffset, DynamicLabel};
 use crossbeam;
+use fnv::FnvHasher;
 
 use std::mem;
 use std::{i32, i64, u8};
@@ -11,12 +12,193 @@ use std::sync::mpsc;
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::Path;
+use std::hash::BuildHasherDefault;
 
 use interpreter::{Command, Integer};
 
+struct RetLoc(usize, *const u8);
+
+// utility defs:
+dynasm!(ops
+    ; .alias state, rcx
+    ; .alias stack, rdx // initialized after a call to get_stack
+    ; .alias stack_start, r8 // not restored after a call since only copy needs it. can be reused as a temp?
+    ; .alias retval, rax
+    ; .alias temp0, rax // rax is used as a general temp reg
+    ; .alias temp1, r10
+    ; .alias temp2, r11
+    ; .alias temp3, r9
+);
+
+macro_rules! epilogue {
+    ($ops:expr, , $command_index:expr) => {dynasm!($ops
+        ; mov retval, DWORD $command_index as _
+        ; add rsp, BYTE 0x28
+        ; ret
+    )};
+    ($ops:expr, $stack_effect:expr, $command_index:expr) => {dynasm!($ops
+        ; mov retval, DWORD $command_index as _
+        ; add QWORD state => JitState.stack_change, DWORD $stack_effect as _
+        ; add rsp, BYTE 0x28
+        ; ret
+    )};
+    ($ops:expr, $stack_effect:expr) => {dynasm!($ops
+        ; add QWORD state => JitState.stack_change, DWORD $stack_effect as _
+        ; add rsp, BYTE 0x28
+        ; ret
+    )};
+}
+
+macro_rules! call_extern {
+    ($ops:expr, $addr:expr, $offset:expr) => {dynasm!($ops
+        ; lea stack, stack => Integer[$offset]
+        ; mov temp0, QWORD $addr as _
+        ; call temp0
+        ; mov state, [rsp + 0x30]
+        ; mov stack, [rsp + 0x38]
+    )}
+}
+
+const DYNAMIC_REGS: usize = 3;
+const REG_ENCODINGS: &'static [u8; DYNAMIC_REGS] = &[9, 10, 11];
+
+#[derive(Debug, Clone)]
+struct RegAllocator {
+    allocations: [Option<RegAllocation>; DYNAMIC_REGS]
+}
+
+impl RegAllocator {
+    fn set_offset(&mut self, reg: u8, offset: i32) {
+        let mut alloc = self.allocations.iter_mut().filter_map(|x| x.as_mut()).find(|x| x.reg == reg).unwrap();
+        alloc.offset = offset;
+        alloc.mutated = true;
+    }
+
+    fn forget<F>(&mut self, filter: F) where F: Fn(i32) -> bool {
+        for alloc in self.allocations.iter_mut() {
+            if alloc.is_some() && filter(alloc.unwrap().offset) {
+                *alloc = None;
+            }
+        }
+    }
+
+    fn stage<'a>(&'a mut self, assembler: &'a mut dynasmrt::Assembler) -> AllocationBuilder<'a> {
+        AllocationBuilder {
+            allocator: self,
+            assembler: assembler,
+            queue: Vec::new()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RegAllocation {
+    offset: i32,
+    reg: u8,
+    mutated: bool
+}
+
+struct AllocationBuilder<'a> {
+    allocator: &'a mut RegAllocator,
+    assembler: &'a mut dynasmrt::Assembler,
+    queue: Vec<(&'a mut u8, bool, Option<i32>)>
+}
+
+impl<'a> AllocationBuilder<'a> {
+    fn load(&'a mut self, reg: &'a mut u8, offset: i32) -> &'a mut Self {
+        self.queue.push((reg, false, Some(offset)));
+        self
+    }
+
+    fn free(&'a mut self, reg: &'a mut u8) -> &'a mut Self  {
+        self.queue.push((reg, false, None));
+        self
+    }
+}
+
+impl<'a> Drop for AllocationBuilder<'a> {
+    fn drop(&mut self) {
+        let mut new_allocs: [Option<RegAllocation>; DYNAMIC_REGS] = [None; DYNAMIC_REGS];
+        let mut i = 0;
+        // which allocations are required to keep
+        for &mut (ref mut reg, ref mut evaluated, offset) in self.queue.iter_mut() {
+            if let Some(offset) = offset {
+                if let Some(alloc) = self.allocator.allocations.iter_mut().find(|x| x.map_or(false, |x| x.offset == offset)) {
+                    let alloc = alloc.take().unwrap();
+                    // keep the allocation
+                    new_allocs[i] = Some(alloc);
+                    i += 1;
+                    // return the allocated reg
+                    **reg = alloc.reg;
+                    // mark that this allocation is fulfilled
+                    *evaluated = true;
+                }
+            }
+        }
+
+        // also keep topmost allocations
+        for _ in 0 .. DYNAMIC_REGS - self.queue.len() {
+            let mut state = None;
+            for (i, alloc) in self.allocator.allocations.iter().enumerate() {
+                if let &Some(alloc) = alloc {
+                    if let Some((_, offset)) = state {
+                        if offset < alloc.offset {
+                            state = Some((i, alloc.offset));
+                        }
+                    } else {
+                        state = Some((i, alloc.offset));
+                    }
+                }
+            }
+
+            if let Some((idx, _)) = state {
+                let max = self.allocator.allocations[idx].take().unwrap();
+                new_allocs[i] = Some(max);
+                i += 1;
+            } else {
+                break
+            }
+        }
+
+        // discard old allocs
+        for alloc in self.allocator.allocations.iter_mut() {
+            if let Some(alloc) = alloc.take() {
+                if alloc.mutated {
+                    dynasm!(self.assembler
+                        ; mov stack => Integer[alloc.offset], Rq(alloc.reg)
+                    );
+                }
+            }
+        }
+
+        // load new allocs
+        for (reg, _, offset) in self.queue.drain(..).filter(|x| x.1) {
+            let reg_enc = REG_ENCODINGS.into_iter().cloned().find(|r| new_allocs.iter().all(|x| x.map_or(true, |x| x.reg != *r))).unwrap();
+            *reg = reg_enc;
+            // load it?
+            let offset = if let Some(offset) = offset {
+                dynasm!(self.assembler
+                    ; mov Rq(reg_enc), stack => Integer[offset]
+                );
+                offset
+            } else {
+                0
+            };
+            new_allocs[i] = Some(RegAllocation {
+                reg: reg_enc,
+                offset: offset,
+                mutated: false,
+            });
+            i += 1;
+        }
+
+        self.allocator.allocations = new_allocs;
+    }
+}
+
 pub struct JitState<'a> {
-    callstack: Vec<usize>,
-    heap: HashMap<Integer, Integer>,
+    callstack: Vec<RetLoc>,
+    heap: HashMap<Integer, Integer, BuildHasherDefault<FnvHasher>>,
     stack: Vec<Integer>,
     stack_change: isize,
     input: Box<BufRead + 'a>,
@@ -25,9 +207,10 @@ pub struct JitState<'a> {
 
 impl<'a> JitState<'a> {
     pub fn new(input: Box<BufRead + 'a>, output: Box<Write + 'a>) -> JitState<'a> {
+        let fnv = BuildHasherDefault::<FnvHasher>::default();
         JitState {
             callstack: Vec::new(),
-            heap: HashMap::new(),
+            heap: HashMap::with_hasher(fnv),
             stack: Vec::new(),
             stack_change: 0,
             input: input,
@@ -83,12 +266,22 @@ impl<'a> JitState<'a> {
         (*state).output.write_all(&[value as u8]).is_err() as u8
     }
 
-    unsafe extern "win64" fn call(state: *mut JitState, _stack: *mut Integer, index: usize) {
-        (*state).callstack.push(index)
+    unsafe extern "win64" fn call(state: *mut JitState, _stack: *mut Integer, index: usize, retptr: *const u8) {
+        (*state).callstack.push(RetLoc(index, retptr));
     }
 
-    unsafe extern "win64" fn ret(state: *mut JitState, _stack: *mut Integer, index: usize) -> usize {
-        (*state).callstack.pop().unwrap_or(index)
+    unsafe extern "win64" fn ret(state: *mut JitState, _stack: *mut Integer, fail_index: usize, ret_index: *mut usize) -> *const u8 {
+        if let Some(RetLoc(index, block_ptr)) = (*state).callstack.pop() {
+            if block_ptr.is_null() {
+                *ret_index = index;
+                ptr::null()
+            } else {
+                block_ptr
+            }
+        } else {
+            *ret_index = fail_index;
+            ptr::null()
+        }
     }
 
     unsafe extern "win64" fn get_stack(state: *mut JitState, min_stack: u64, max_stack: u64, stack_start: *mut *mut Integer) -> *mut Integer {
@@ -112,10 +305,15 @@ impl<'a> JitState<'a> {
     }
 }
 
+enum FixUp {
+    Jump(AssemblyOffset, AssemblyOffset),
+    Lea(AssemblyOffset, AssemblyOffset)
+}
+
 struct JitCompiler<'a> {
     commands: &'a [Command],
     blocks: HashMap<usize, JitBlock>,
-    fixups: HashMap<usize, Vec<(AssemblyOffset, AssemblyOffset)>>,
+    fixups: HashMap<usize, Vec<FixUp>>,
     fixup_queue: Vec<(usize, DynamicLabel)>,
     ops: dynasmrt::Assembler
 }
@@ -141,47 +339,6 @@ impl<'a> JitCompiler<'a> {
     fn compile(&mut self, start_index: usize) -> Result<JitBlock, String> {
         use interpreter::Command::*;
 
-        // utility defs:
-        dynasm!(ops
-            ; .alias state, rcx
-            ; .alias stack, rdx // initialized after a call to get_stack
-            ; .alias stack_start, r8 // not restored after a call since only copy needs it.
-            ; .alias retval, rax
-            ; .alias temp0, rax
-            ; .alias temp1, r9
-            ; .alias temp2, r10
-            ; .alias temp3, r11
-        );
-
-        macro_rules! epilogue {
-            ($ops:expr, , $command_index:expr) => {dynasm!($ops
-                ; mov retval, DWORD $command_index as _
-                ; add rsp, BYTE 0x28
-                ; ret
-            )};
-            ($ops:expr, $stack_effect:expr, $command_index:expr) => {dynasm!($ops
-                ; mov retval, DWORD $command_index as _
-                ; add QWORD state => JitState.stack_change, DWORD $stack_effect as _
-                ; add rsp, BYTE 0x28
-                ; ret
-            )};
-            ($ops:expr, $stack_effect:expr) => {dynasm!($ops
-                ; add QWORD state => JitState.stack_change, DWORD $stack_effect as _
-                ; add rsp, BYTE 0x28
-                ; ret
-            )};
-        }
-
-        macro_rules! call_extern {
-            ($ops:expr, $addr:expr, $offset:expr) => {dynasm!($ops
-                ; lea stack, [stack + $offset]
-                ; mov temp0, QWORD $addr as _
-                ; call temp0
-                ; mov state, [rsp + 0x30]
-                ; mov stack, [rsp + 0x38]
-            )}
-        }
-
         // stack effect calculation accumulators.
         // stack_effect will always be the change in stack BEFORE the op while the op is matched,
         // but min/max_stack will take this op into account if it exits there.
@@ -189,42 +346,21 @@ impl<'a> JitCompiler<'a> {
         let mut min_stack   : i32 = 0;
         let mut max_stack   : i32 = 0;
 
-        // to prevent large amounts of memory traffic to the top of the stack, we try to keep the topmost live value
-        // in the temp0 register. 
-        /* let mut top_in_reg = false;
-
-        macro_rules! spill_top_reg {
-            ($offset:expr) => {if top_in_reg {
-                dynasm!(ops
-                    ; mov stack => Integer[$offset], temp0
-                );
-            }};
-        }
-
-        macro_rules! get_top_reg {
-            ($offset:expr) => {if !top_in_reg {
-                dynasm!(ops
-                    ; mov temp0, stack => Integer[$offset]
-                );
-            }};
-        }*/
-
         //  function prologue. when called we start here, if we jump from another jit block we start at chained
         let block = JitBlock {
             start: self.ops.offset(),
             chained: self.ops.new_dynamic_label()
         };
+        self.blocks.insert(start_index, block);
+        let stack_fixes;
         dynasm!(self.ops
             ; sub rsp, BYTE 0x28
             ; mov [rsp + 0x30], state // rcx
             ;=>block.chained
-        );
 
-        self.blocks.insert(start_index, block);
+            // get the stack handle, bail out if we don't (this indicates that a stack error would occur)
+            ;; stack_fixes = self.ops.offset()
 
-        // get the stack handle, bail out if we don't (this indicates that a stack error would occur)
-        let stack_fixes = self.ops.offset();
-        dynasm!(self.ops
             // prep args for get stack (rcx is already set to state). min_stack and max_stack are later fixed up
             ; mov rdx, 0
             ; mov r8, 0
@@ -304,9 +440,7 @@ impl<'a> JitCompiler<'a> {
                                     ; mov temp0, stack => Integer[offset]
                                     ; sub temp0, value
                                     ; jno >overflow
-                                );
-                                epilogue!(self.ops, stack_effect, command_index);
-                                dynasm!(self.ops
+                                    ;; epilogue!(self.ops, stack_effect, command_index)
                                     ;overflow:
                                     ; mov stack => Integer[offset], temp0 
                                 );
@@ -318,9 +452,7 @@ impl<'a> JitCompiler<'a> {
                                 dynasm!(self.ops
                                     ; imul temp0, stack => Integer[offset], value
                                     ; jno >overflow
-                                );
-                                epilogue!(self.ops, stack_effect, command_index);
-                                dynasm!(self.ops
+                                    ;; epilogue!(self.ops, stack_effect, command_index)
                                     ;overflow:
                                     ; mov QWORD stack => Integer[offset], value
                                 );
@@ -354,8 +486,8 @@ impl<'a> JitCompiler<'a> {
                     },
                     Copy {index} => {
                         dynasm!(self.ops
-                            ; mov stack_start, [rsp + 0x40]
-                            ; mov temp0, stack_start => Integer[index as i32]
+                            ; mov temp0, [rsp + 0x40]
+                            ; mov temp0, temp0 => Integer[index as i32]
                             ; mov stack => Integer[offset + 1], temp0
                         );
                         // adjust min_stack if necessary
@@ -376,9 +508,7 @@ impl<'a> JitCompiler<'a> {
                             ; mov temp0, stack => Integer[offset]
                             ; add temp0, stack => Integer[offset - 1]
                             ; jno >overflow
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;overflow:
                             ; mov stack => Integer[offset - 1], temp0
                         );
@@ -389,9 +519,7 @@ impl<'a> JitCompiler<'a> {
                             ; mov temp0, stack => Integer[offset]
                             ; add temp0, stack => Integer[offset - 1]
                             ; jno >overflow
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;overflow:
                             ; mov stack => Integer[offset - 1], temp0
                         );
@@ -402,9 +530,7 @@ impl<'a> JitCompiler<'a> {
                             ; mov temp0, stack => Integer[offset]
                             ; imul temp0, stack => Integer[offset - 1]
                             ; jno >overflow
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;overflow:
                             ; mov stack => Integer[offset - 1], temp0
                         );
@@ -414,9 +540,7 @@ impl<'a> JitCompiler<'a> {
                         dynasm!(self.ops
                             ; cmp QWORD stack => Integer[offset - 1], BYTE 0
                             ; jnz >div0
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;div0:
                             ; mov rax, stack => Integer[offset - 1]
                             ; mov temp1, stack
@@ -431,9 +555,7 @@ impl<'a> JitCompiler<'a> {
                         dynasm!(self.ops
                             ; cmp QWORD stack => Integer[offset - 1], BYTE 0
                             ; jnz >div0
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;div0:
                             ; mov rax, stack => Integer[offset - 1]
                             ; mov temp1, stack
@@ -453,9 +575,7 @@ impl<'a> JitCompiler<'a> {
                         dynasm!(self.ops
                             ; test al, al
                             ; jz >key_not_found
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;key_not_found:
                         );
                         (0, 1)
@@ -473,16 +593,26 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             epilogue!(self.ops, , target);
-                            Self::add_fixup(&mut self.fixups, target, start, self.ops.offset());
+                            Self::add_fixup(&mut self.fixups, target, FixUp::Jump(start, self.ops.offset()));
                         }
                         break;
                     },
                     Call {index} => {
+                        if let Some(block) = self.blocks.get(&(command_index + 1)) {
+                            dynasm!(self.ops
+                                ; xor r8, r8
+                                ; lea r9, [=>block.chained]
+                            );
+                        } else {
+                            let start = self.ops.offset();
+                            dynasm!(self.ops
+                                ; mov r8, command_index as i32 + 1
+                                ; xor r9, r9
+                            );
+                            Self::add_fixup(&mut self.fixups, command_index + 1, FixUp::Lea(start, self.ops.offset()));
+                        }
                         dynasm!(self.ops
-                            ; mov r8, command_index as i32 + 1
-                        );
-                        call_extern!(self.ops, JitState::call, offset);
-                        dynasm!(self.ops
+                            ;; call_extern!(self.ops, JitState::call, offset)
                             ; add QWORD state => JitState.stack_change, DWORD stack_effect
                         );
                         if let Some(block) = self.blocks.get(&index) {
@@ -492,7 +622,7 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, start, self.ops.offset());
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
                         }
                         break;
                     },
@@ -507,7 +637,7 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, start, self.ops.offset());
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
                         }
                         break;
                     },
@@ -524,7 +654,7 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, start, self.ops.offset());
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
                         }
                         dynasm!(self.ops
                             ;no_branch:
@@ -544,7 +674,7 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, start, self.ops.offset());
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
                         }
                         dynasm!(self.ops
                             ;no_branch:
@@ -553,10 +683,17 @@ impl<'a> JitCompiler<'a> {
                     },
                     EndSubroutine => { // we would always eat the virtual dispatch here so we just eat it.
                         dynasm!(self.ops
+                            ; add QWORD state => JitState.stack_change, DWORD stack_effect
                             ; mov r8, command_index as i32
+                            ; lea r9, [rsp + 0x48]
+                            ;; call_extern!(self.ops, JitState::ret, offset)
+                            ; test retval, retval
+                            ; jz >interpret
+                            ; jmp retval
+                            ;interpret:
+                            ; mov retval, [rsp + 0x48]
+                            ;; epilogue!(self.ops, stack_effect)
                         );
-                        call_extern!(self.ops, JitState::ret, offset);
-                        epilogue!(self.ops, stack_effect);
                         break;
                     },
                     EndProgram => {
@@ -564,49 +701,41 @@ impl<'a> JitCompiler<'a> {
                         break;
                     },
                     PrintChar => {
-                        call_extern!(self.ops, JitState::print_char, offset);
                         dynasm!(self.ops
+                            ;; call_extern!(self.ops, JitState::print_char, offset)
                             ; test al, al
                             ; jz >io_fail
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;io_fail:
                         );
                         (-1, 0)
                     },
                     PrintNum => {
-                        call_extern!(self.ops, JitState::print_num, offset);
                         dynasm!(self.ops
+                            ;; call_extern!(self.ops, JitState::print_num, offset)
                             ; test al, al
                             ; jz >io_fail
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;io_fail:
                         );
                         (-1, 0)
                     },
                     InputChar => {
-                        call_extern!(self.ops, JitState::input_char, offset);
                         dynasm!(self.ops
+                            ;; call_extern!(self.ops, JitState::input_char, offset)
                             ; test al, al
                             ; jz >io_fail
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;io_fail:
                         );
                         (0, 1)
                     },
                     InputNum => {
-                        call_extern!(self.ops, JitState::input_num, offset);
                         dynasm!(self.ops
+                            ;; call_extern!(self.ops, JitState::input_num, offset)
                             ; test al, al
                             ; jz >io_fail
-                        );
-                        epilogue!(self.ops, stack_effect, command_index);
-                        dynasm!(self.ops
+                            ;; epilogue!(self.ops, stack_effect, command_index)
                             ;io_fail:
                         );
                         (0, 1)
@@ -651,12 +780,20 @@ impl<'a> JitCompiler<'a> {
             self.ops.alter(|ops| {
                 for (target, label) in fixup_queue.drain(..) {
                     if let Some(mut fixups) = fixups.remove(&target) {
-                        for (start, end) in fixups.drain(..) {
-                            ops.goto(start);
-                            dynasm!(ops
-                                ; jmp =>label
-                            );
-                            ops.check(end);
+                        for fixup in fixups.drain(..) {
+                            match fixup {
+                                FixUp::Jump(start, end) => dynasm!(ops
+                                    ;; ops.goto(start)
+                                    ; jmp =>label
+                                    ;; ops.check(end)
+                                ),
+                                FixUp::Lea(start, end) => dynasm!(ops
+                                    ;; ops.goto(start)
+                                    ; xor r8, r8
+                                    ; lea r9, [=>label]
+                                    ;; ops.check(end)
+                                )
+                            }
                         }
                     }
                 }
@@ -664,8 +801,8 @@ impl<'a> JitCompiler<'a> {
         }
     }
 
-    fn add_fixup(fixups: &mut HashMap<usize, Vec<(AssemblyOffset, AssemblyOffset)>>, target: usize, start: AssemblyOffset, end: AssemblyOffset) {
-        fixups.entry(target).or_insert_with(|| Vec::new()).push((start, end));
+    fn add_fixup(fixups: &mut HashMap<usize, Vec<FixUp>>, target: usize, fixup: FixUp) {
+        fixups.entry(target).or_insert_with(|| Vec::new()).push(fixup);
     }
 
     fn compile_index(&mut self, target: usize) -> Option<AssemblyOffset> {
@@ -711,7 +848,6 @@ impl<'a> JitInterpreter<'a> {
     pub fn precompile(&mut self) {
         use interpreter::Command::*;
         if !self.commands.is_empty() {
-            self.jit_handles[0] = self.compiler.compile_index(0);
 
             for (i, c) in self.commands.iter().enumerate() {
                 let i = match *c {
@@ -790,6 +926,13 @@ impl<'a> JitInterpreter<'a> {
         let mut retval = Some("Hit end of program".into());
 
         let mut command_index = 0;
+        // avoid compiling the first part
+        match Self::interpret_block(&mut self.state, &self.commands, command_index) {
+            Ok(new_index) => command_index = new_index,
+            Err(Some(msg)) => return Err(msg),
+            Err(None)      => return Ok(())
+        }
+
         while let Some(&offset) = self.jit_handles.get(command_index) {
 
             // can we jit?
@@ -803,22 +946,19 @@ impl<'a> JitInterpreter<'a> {
                     command_index = new_index;
                     continue;
                 }
-            } else if command_index != 0 {
+            } else if let Some(start) = self.compiler.compile_index(command_index) {
+                drop(lock);
+                self.compiler.commit();
+                lock = executor.lock();
 
-                if let Some(start) = self.compiler.compile_index(command_index) {
-                    drop(lock);
-                    self.compiler.commit();
-                    lock = executor.lock();
-
-                    self.jit_handles[command_index] = Some(start);
-                    let new_index = unsafe {
-                        JitCompiler::run_block(lock.ptr(start), &mut self.state)
-                    };
-                    // not a bail-out
-                    if new_index != command_index {
-                        command_index = new_index;
-                        continue;
-                    }
+                self.jit_handles[command_index] = Some(start);
+                let new_index = unsafe {
+                    JitCompiler::run_block(lock.ptr(start), &mut self.state)
+                };
+                // not a bail-out
+                if new_index != command_index {
+                    command_index = new_index;
+                    continue;
                 }
             }
 
@@ -907,6 +1047,7 @@ impl<'a> JitInterpreter<'a> {
     }
 
     fn interpret_block(state: &mut JitState, commands: &[Command], mut command_index: usize) -> Result<usize, Option<Cow<'static, str>>> {
+        println!("entering interpreter");
         use interpreter::Command::*;
         // interpret until we hit something that can cause a flow control convergence (jump, call, ret)
         while let Some(c) = commands.get(command_index) {
@@ -1011,7 +1152,7 @@ impl<'a> JitInterpreter<'a> {
                     break;
                 },
                 Call {index} => {
-                    state.callstack.push(command_index + 1);
+                    state.callstack.push(RetLoc(command_index + 1, ptr::null()));
                     command_index = index;
                     break;
                 },
@@ -1039,7 +1180,7 @@ impl<'a> JitInterpreter<'a> {
                     }
                     _ => (),
                 },
-                EndSubroutine => if let Some(index) = state.callstack.pop() {
+                EndSubroutine => if let Some(RetLoc(index, _)) = state.callstack.pop() {
                     command_index = index;
                     break;
                 } else {
