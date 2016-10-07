@@ -1,5 +1,5 @@
 use label::Label;
-use interpreter::{Program, Command, Integer, SourceLoc};
+use program::{Program, Command, Integer, SourceLoc};
 
 #[derive(Debug, Clone)]
 struct ParseState<'a> {
@@ -145,8 +145,23 @@ impl<'a> Program<'a> {
                 (3, 17) | 
                 (3, 24) | 
                 (3, 25) | 
-                (4, _) => return Err(format!("invalid command at line {}, column {}: hash {} hash_len {}",
-                                             startline, startcolumn, hash, hash_length)),
+                (4, _) => {
+                    let mut buf = [0u8; 5];
+                    for i in 0 .. hash_length {
+                        buf[i] = hash % 3;
+                        hash /= 3;
+                    }
+
+                    let s = buf[..hash_length].iter().rev().map(|c| if *c == 0 {
+                        'S'
+                    } else if *c == 1 {
+                        'T'
+                    } else {
+                        'N'
+                    }).collect::<String>();
+
+                    return Err(format!("invalid command at line {}, column {}: {}", startline, startcolumn, s));
+                },
                 (_, _) => continue
             };
 
@@ -196,7 +211,7 @@ impl<'a> Program<'a> {
                     return buffer;
                 }
             }
-            use interpreter::Command::*;
+            use program::Command::*;
             for (index, command) in self.commands.iter().enumerate() {
                 let (code, arg): (&[u8], _) = match *command {
                     Push {value}           => (b"  ", Some(number_to_ws(value))),

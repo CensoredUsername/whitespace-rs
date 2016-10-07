@@ -1,23 +1,11 @@
-#![feature(plugin)]
-#![plugin(dynasm)]
-extern crate dynasmrt;
-extern crate itertools;
-extern crate crossbeam;
-extern crate fnv;
+extern crate whitespacers;
 
-use std::io::{BufRead, Read, Write, self};
-use std::fs::File;
-use std::string::ToString;
 use std::env;
+use std::io::{self, Write, Read, BufRead};
+use std::fs::File;
 use std::time::Instant;
 
-mod label;
-mod parser;
-mod interpreter;
-mod assembler;
-#[cfg(target_arch = "x86_64")]
-mod jit;
-use interpreter::{Interpreter, Program};
+use whitespacers::{Program, JitInterpreter};
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -104,7 +92,7 @@ fn console_main() -> Result<(), String> {
             }.map_err(|e| e.to_string())
         ),
         _ => {
-            let input: Box<BufRead> = if let Some(path) = args.input {
+            let mut input: Box<BufRead> = if let Some(path) = args.input {
                 Box::new(io::BufReader::new(
                     try!(File::open(&path).map_err(|e| e.to_string()))
                 ))
@@ -115,25 +103,23 @@ fn console_main() -> Result<(), String> {
             };
             match args.action {
                 Action::Execute => {
-                    let mut interpreter = Interpreter::new(program, input, output);
-                    println!("ran {} items", try!(interpreter.run()));
+                    panic!("Currently being refactored")
                 },
                 Action::Jit(strategy) => {
-                    let mut jitinterpreter = jit::JitInterpreter::new(&program.commands, input, output);
+                    let mut jitinterpreter = JitInterpreter::new(&program, &mut input, &mut output);
                     let res = match strategy {
                         JitStrategy::None => jitinterpreter.interpret(),
                         JitStrategy::AoT => {
                             jitinterpreter.precompile();
+                            if let Some(filename) = args.debug {
+                                try!(jitinterpreter.dump(filename).map_err(|e| e.to_string()));
+                            }
                             time_compiling = Some(Instant::now());
                             jitinterpreter.simple_jit()
                         },
                         JitStrategy::Sync => jitinterpreter.synchronous_jit(),
                         JitStrategy::Async => jitinterpreter.threaded_jit()
-                    }.map_err(|e| e.into_owned());
-
-                    if let Some(filename) = args.debug {
-                        try!(jitinterpreter.dump(filename).map_err(|e| e.to_string()));
-                    }
+                    }.map_err(|e| program.format_error(e.0, e.1));
                     try!(res);
                 },
                 _ => unreachable!()
@@ -224,9 +210,9 @@ fn parse_args() -> Result<Args, String> {
                     };
                 },
                 "-t" | "--translate" => if action != Action::Execute {
-                    action = Action::Translate;
+                    return Err("Option --translate or --jit was specified twice".to_string());
                 } else {
-                    return Err("Option --translate or --jit was specified twice".to_string())
+                    action = Action::Translate;
                 },
                 "-j" | "--jit" => if action != Action::Execute {
                     return Err("Option --translate or --jit was specified twice".to_string());

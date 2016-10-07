@@ -3,15 +3,21 @@ name = "whitespacers"
 version = "0.0.1"
 authors = [ "CensoredUsername cens.username@gmail.com" ]
 
+[lib]
+name = "whitespacers"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wsc"
+path = "src/main.rs"
+
 [dependencies]
 itertools = "0.4.*"
 crossbeam = "0.2.*"
-
-[dependencies.dynasmrt]
-path = "../../dynasm-rs/runtime"
-
-[dependencies.dynasm]
-path = "../../dynasm-rs/plugin"
+fnv       = "1.0.*"
+bitflags  = "0.7.*"
+dynasm    = "0.*.*"
+dynasmrt  = "0.*.*"
 
 [profile.release]
 debug = true

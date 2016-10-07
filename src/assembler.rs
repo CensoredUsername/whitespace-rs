@@ -2,11 +2,11 @@ use std::str;
 use std::fmt;
 use std::rc::Rc;
 
-use interpreter::{Program, Command, Integer, SourceLoc};
+use program::{Program, Command, Integer, SourceLoc};
 
 impl<'a> Program<'a> {
     pub fn disassemble(&self) -> String {
-        use interpreter::Command::*;
+        use program::Command::*;
 
         let mut buffer = String::new();
         for (index, command) in self.commands.iter().enumerate() {
