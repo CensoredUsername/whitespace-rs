@@ -189,10 +189,11 @@ impl<'a> TokenizerState<'a> {
                     }
                     TokenType::Comment
                 },
-                'a'...'z' | '_' => {
+                'a'...'z' | 'A'...'Z' | '_' => {
                     loop {
                         match state.next() {
                             Some('a'...'z') |
+                            Some('A'...'Z') |
                             Some('_') |
                             Some('0'...'9') => continue,
                             _               => break

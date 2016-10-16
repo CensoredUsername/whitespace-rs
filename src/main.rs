@@ -4,12 +4,15 @@ use std::env;
 use std::io::{self, Write, Read, BufRead};
 use std::fs::File;
 use std::time::Instant;
+use std::error::Error;
 
-use whitespacers::{Program, JitInterpreter};
+use whitespacers::{Program, JitInterpreter, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP};
+use whitespacers::State;
 
 #[derive(Debug, Clone)]
 struct Args {
     program: String,        // this is where we read the program from.
+    options: Options,       // any options to influence execution
     input: Option<String>,  // this is where we read input for the program from. if None, stdin
     output: Option<String>, // this is where we output data to. if None, stdin
     format: FileFormat,     // format of input file. default is Whitespace
@@ -33,7 +36,6 @@ enum Action {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum JitStrategy {
-    None,
     AoT,
     Sync,
     Async
@@ -103,12 +105,11 @@ fn console_main() -> Result<(), String> {
             };
             match args.action {
                 Action::Execute => {
-                    panic!("Currently being refactored")
+                    try!(whitespacers::simple_interpret(&program, args.options, &mut input, &mut output).map_err(|e| e.description().to_string()));
                 },
                 Action::Jit(strategy) => {
-                    let mut jitinterpreter = JitInterpreter::new(&program, &mut input, &mut output);
+                    let mut jitinterpreter = JitInterpreter::new(&program, args.options, &mut input, &mut output);
                     let res = match strategy {
-                        JitStrategy::None => jitinterpreter.interpret(),
                         JitStrategy::AoT => {
                             jitinterpreter.precompile();
                             if let Some(filename) = args.debug {
@@ -119,7 +120,7 @@ fn console_main() -> Result<(), String> {
                         },
                         JitStrategy::Sync => jitinterpreter.synchronous_jit(),
                         JitStrategy::Async => jitinterpreter.threaded_jit()
-                    }.map_err(|e| program.format_error(e.0, e.1));
+                    }.map_err(|mut e| {e.set_location(*jitinterpreter.state.index()); e.description().to_string()});
                     try!(res);
                 },
                 _ => unreachable!()
@@ -170,6 +171,7 @@ fn parse_args() -> Result<Args, String> {
     let mut output = None;
     let mut format = None;
     let mut action = Action::Execute;
+    let mut options = Options::empty();
 
     let mut args = env::args();
     let mut pos_args = Vec::new();
@@ -218,12 +220,21 @@ fn parse_args() -> Result<Args, String> {
                     return Err("Option --translate or --jit was specified twice".to_string());
                 } else {
                     action = match try_opt!(args.next(), "Missing argument to --jit".to_string()).as_ref() {
-                        "none"  => Action::Jit(JitStrategy::None),
                         "aot"   => Action::Jit(JitStrategy::AoT),
                         "sync"  => Action::Jit(JitStrategy::Sync),
                         "async" => Action::Jit(JitStrategy::Async),
                         a => return Err(format!("Unrecognized jit strategy {}", a))
                     };
+                },
+                "--ignore-overflow" => if options.contains(IGNORE_OVERFLOW) {
+                    return Err("Option --ignore-overflow was specified twice".to_string());
+                } else {
+                    options |= IGNORE_OVERFLOW;
+                },
+                "--unchecked-heap" => if options.contains(UNCHECKED_HEAP) {
+                    return Err("Option --unchecked-heap was specified twice".to_string());
+                } else {
+                    options |= UNCHECKED_HEAP;
                 },
                 "-h" | "--help" => return Err("Usage: whitespacers INPUT [-h | -i INFILE | -o OUTFILE | [-t | -j] | -f FORMAT]
 
@@ -236,7 +247,7 @@ Options:
     -f --format FORMAT   Input file format. Supported options are [whitespace|ws|assembly|asm],
                           the default is whitespace.
     -t --translate       Translate the file from whitespace to assembly (or in reverse).
-    -j --jit STRATEGY    Execute the file using jit techniques. Options are [none|aot|sync|async]
+    -j --jit STRATEGY    Execute the file using jit techniques. Options are [aot|sync|async]
 ".to_string()),
                 "--" => {
                     pos_args.extend(args);
@@ -261,6 +272,7 @@ Options:
 
     return Ok(Args {
         program: program,
+        options: options,
         input: input,
         output: output,
         format: format.unwrap_or(FileFormat::Whitespace),
