@@ -1,30 +1,24 @@
-use std::collections::HashMap;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::str;
-use std::fmt;
+use num_bigint::BigInt;
+
 use std::rc::Rc;
-use std::borrow::Cow;
+use std::ops::Range;
 
 use label::Label;
 
-#[derive(Debug, Clone)]
-pub struct Program<'a> {
-    pub source: Option<&'a [u8]>,
-    pub commands: Vec<Command>,
-    pub locs: Option<Vec<SourceLoc<'a>>>
-}
+pub use ::Program;
 
 #[derive(Debug, Clone)]
-pub struct SourceLoc<'a> {
+pub struct SourceLoc {
     pub line: usize,
     pub column: usize,
-    pub text: &'a [u8],
+    pub span: Range<usize>,
     pub label: Option<Rc<Label>>
 }
 
 #[derive(Debug, Clone)]
 pub enum Command {
     Push {value: Integer},
+    PushBig {value: BigInteger},
     Duplicate,
     Copy {index: usize},
     Swap,
@@ -50,69 +44,20 @@ pub enum Command {
     InputNum
 }
 
-pub type Integer = isize;
+pub type Integer = i64;
 
-impl<'a> Program<'a> {
-    pub fn compile(&mut self) -> Result<(), String> {
-        let mut index_map = HashMap::<Rc<Label>, usize>::new();
+pub type BigInteger = BigInt;
 
-        let locs = if let Some(ref locs) = self.locs {
-            locs
-        } else {
-            return Err("This program has been stripped".to_string());
-        };
+#[derive(Debug, Clone)]
+pub enum SizedInteger {
+    Big(BigInteger),
+    Small(Integer)
+}
 
-        for (index, (command, loc)) in self.commands.iter().zip(locs).enumerate() {
-            if let Command::Label = *command {
-                match index_map.entry(loc.label.clone().unwrap()) {
-                    Occupied(_) => return Err(format!("Duplicate label {}", loc.label.as_ref().unwrap())),
-                    Vacant(e)   => e.insert(index + 1)
-                };
-            }
-        }
-
-        for (command, loc) in self.commands.iter_mut().zip(locs) {
-            match *command {
-                Command::Call {ref mut index} |
-                Command::Jump {ref mut index} |
-                Command::JumpIfZero {ref mut index} |
-                Command::JumpIfNegative {ref mut index} => match index_map.entry(loc.label.clone().unwrap()) {
-                    Occupied(e) => *index = *e.get(),
-                    Vacant(_)   => return Err("Undefined label".to_string())
-                },
-                _ => ()
-            };
-        }
-
-        Ok(())
-    }
-
+impl Program {
+    /// Remove source location information from the program.
     pub fn strip(&mut self) {
         self.source = None;
         self.locs = None;
-    }
-
-    pub fn format_error(&self, index: usize, message: Cow<'static, str>) -> String {
-        if let Some(command) = self.commands.get(index) {
-            if let Some(ref locs) = self.locs {
-                let loc = &locs[index];
-                return format!("At command {} (line {}, column {}): {}\n{:?}", index + 1, loc.line, loc.column, message, command);
-            } 
-            return format!("At command {}: {}\n{:?}", index + 1, message, command);
-        } else {
-            return format!("At the end of the program: {}", message);
-        }
-    }
-}
-
-impl<'a> fmt::Display for SourceLoc<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-
-        try!(write!(f, "line {}, column {}: ", self.line, self.column));
-        if let Ok(s) = str::from_utf8(self.text) {
-            f.write_str(s)
-        } else {
-            f.write_str("Invalid utf-8")
-        }
     }
 }

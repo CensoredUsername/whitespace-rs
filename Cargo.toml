@@ -12,12 +12,14 @@ name = "wsc"
 path = "src/main.rs"
 
 [dependencies]
-itertools = "0.4.*"
-crossbeam = "0.2.*"
-fnv       = "1.0.*"
-bitflags  = "0.7.*"
-dynasm    = "0.*.*"
-dynasmrt  = "0.*.*"
+itertools  = "0.*.*"
+crossbeam  = "0.*.*"
+fnv        = "1.*.*"
+bitflags   = "0.*.*"
+num-bigint = "0.*.*"
+num-traits = "0.*.*"
+dynasm     = "0.*.*"
+dynasmrt   = "0.*.*"
 
 [profile.release]
 debug = true

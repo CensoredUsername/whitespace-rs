@@ -4,10 +4,8 @@ use std::env;
 use std::io::{self, Write, Read, BufRead};
 use std::fs::File;
 use std::time::Instant;
-use std::error::Error;
 
-use whitespacers::{Program, JitInterpreter, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP};
-use whitespacers::State;
+use whitespacers::{Program, Interpreter, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK, debug_compile};
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -17,7 +15,6 @@ struct Args {
     output: Option<String>, // this is where we output data to. if None, stdin
     format: FileFormat,     // format of input file. default is Whitespace
     action: Action,         // output format. translate or execute.
-    debug: Option<String>,  // file to dump the jit executable buffer to.
     perf: bool              // print perf info to stdout?
 }
 
@@ -30,12 +27,15 @@ enum FileFormat {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Action {
     Translate,
-    Execute,
-    Jit(JitStrategy)
+    Execute(Strategy),
+    Dump(String)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum JitStrategy {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Strategy {
+    SimpleState,
+    BigState,
+    FastState,
     AoT,
     Sync,
     Async
@@ -44,7 +44,7 @@ enum JitStrategy {
 fn main() {
     match console_main() {
         Ok(()) => (),
-        Err(s) => write!(io::stderr(), "{}\n", s).unwrap()
+        Err(s) => write!(io::stderr(), "Error: {}\n", s).unwrap()
     }
 }
 
@@ -68,8 +68,8 @@ fn console_main() -> Result<(), String> {
     let time_input = Instant::now();
 
     let program = try!(match args.format {
-        FileFormat::Whitespace => Program::parse(data.as_bytes()),
-        FileFormat::Assembly => Program::assemble(&data)
+        FileFormat::Whitespace => Program::parse(data.into_bytes()).map_err(|e| e.to_string()),
+        FileFormat::Assembly => Program::assemble(data).map_err(|e| e.to_string())
     });
 
     let time_parse = Instant::now();
@@ -84,15 +84,17 @@ fn console_main() -> Result<(), String> {
         ))
     };
 
-    let mut time_compiling = None;
+    let time_finish;
 
     match args.action {
-        Action::Translate => try!(
-            match args.format {
+        Action::Translate => {
+            try!(match args.format {
                 FileFormat::Whitespace => output.write_all(program.disassemble().as_bytes()),
-                FileFormat::Assembly   => output.write_all(program.dump(true).as_slice())
-            }.map_err(|e| e.to_string())
-        ),
+                FileFormat::Assembly   => output.write_all(program.dump().as_slice())
+            }.map_err(|e| e.to_string()));
+
+            time_finish = Instant::now();
+        },
         _ => {
             let mut input: Box<BufRead> = if let Some(path) = args.input {
                 Box::new(io::BufReader::new(
@@ -104,31 +106,28 @@ fn console_main() -> Result<(), String> {
                 ))
             };
             match args.action {
-                Action::Execute => {
-                    try!(whitespacers::simple_interpret(&program, args.options, &mut input, &mut output).map_err(|e| e.description().to_string()));
+                Action::Execute(strategy) => {
+                    let mut interpreter = Interpreter::new(&program, args.options, &mut input, &mut output);
+                    try!(match strategy {
+                        Strategy::SimpleState => interpreter.interpret_with_simple_state(),
+                        Strategy::BigState => interpreter.interpret_with_bigint_state(),
+                        Strategy::FastState => interpreter.interpret_with_fast_state(),
+                        Strategy::AoT => interpreter.jit_aot(),
+                        Strategy::Sync => interpreter.jit_sync(),
+                        Strategy::Async => interpreter.jit_threaded()
+                    }.map_err(|e| {e.format_with_program(&program)}));
+                    time_finish = Instant::now();
                 },
-                Action::Jit(strategy) => {
-                    let mut jitinterpreter = JitInterpreter::new(&program, args.options, &mut input, &mut output);
-                    let res = match strategy {
-                        JitStrategy::AoT => {
-                            jitinterpreter.precompile();
-                            if let Some(filename) = args.debug {
-                                try!(jitinterpreter.dump(filename).map_err(|e| e.to_string()));
-                            }
-                            time_compiling = Some(Instant::now());
-                            jitinterpreter.simple_jit()
-                        },
-                        JitStrategy::Sync => jitinterpreter.synchronous_jit(),
-                        JitStrategy::Async => jitinterpreter.threaded_jit()
-                    }.map_err(|mut e| {e.set_location(*jitinterpreter.state.index()); e.description().to_string()});
-                    try!(res);
+                Action::Dump(ref filename) => {
+                    let buffer = debug_compile(&program, args.options);
+                    time_finish = Instant::now();
+                    let mut f = try!(File::create(filename).map_err(|e| e.to_string()));
+                    try!(f.write_all(&buffer).map_err(|e| e.to_string()));
                 },
                 _ => unreachable!()
             };
         }
     }
-
-    let time_finish = Instant::now();
 
     if args.perf {
         let duration = time_args - time_start;
@@ -140,15 +139,11 @@ fn console_main() -> Result<(), String> {
         let duration = time_parse - time_input;
         println!("Time spent parsing:      {}.{:09}", duration.as_secs(), duration.subsec_nanos());
 
-        if let Some(time_compiling) = time_compiling {
-            let duration = time_compiling - time_parse;
-            println!("Time spent compiling:    {}.{:09}", duration.as_secs(), duration.subsec_nanos());
-
-            let duration = time_finish - time_compiling;
-            println!("Time spent executing:    {}.{:09}", duration.as_secs(), duration.subsec_nanos());
-        } else {
-            let duration = time_finish - time_parse;
-            println!("Time spent executing:    {}.{:09}", duration.as_secs(), duration.subsec_nanos());
+        let duration = time_finish - time_parse;
+        match args.action {
+            Action::Dump(_)    => println!("Time spent compiling:    {}.{:09}", duration.as_secs(), duration.subsec_nanos()),
+            Action::Execute(_) => println!("Time spent executing:    {}.{:09}", duration.as_secs(), duration.subsec_nanos()),
+            Action::Translate  => println!("Time spent translating:  {}.{:09}", duration.as_secs(), duration.subsec_nanos()),
         }
     }
 
@@ -165,12 +160,11 @@ macro_rules! try_opt {
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut debug = None;
     let mut perf = false;
     let mut input = None;
     let mut output = None;
     let mut format = None;
-    let mut action = Action::Execute;
+    let mut action = None;
     let mut options = Options::empty();
 
     let mut args = env::args();
@@ -182,10 +176,10 @@ fn parse_args() -> Result<Args, String> {
     loop {
         match args.next() {
             Some(arg) => match arg.as_ref() {
-                "-d" | "--debug" => if let Some(_) = debug {
-                    return Err("Option --debug was specified twice".to_string());
+                "-d" | "--dump" => if let Some(_) = action {
+                    return Err("Option --dump, --translate or --execute was specified twice".to_string());
                 } else {
-                    debug = Some(try_opt!(args.next(), "Missing argument to --debug".to_string()));
+                    action = Some(Action::Dump(try_opt!(args.next(), "Missing argument to --dump".to_string())));
                 },
                 "-p" | "--perf" => if perf {
                     return Err("Option --perf was specified twice".to_string());
@@ -211,20 +205,23 @@ fn parse_args() -> Result<Args, String> {
                         f => return Err(format!("Unrecognized input format {}", f))
                     };
                 },
-                "-t" | "--translate" => if action != Action::Execute {
-                    return Err("Option --translate or --jit was specified twice".to_string());
+                "-t" | "--translate" => if let Some(_) = action {
+                    return Err("Option --dump, --translate or --execute was specified twice".to_string());
                 } else {
-                    action = Action::Translate;
+                    action = Some(Action::Translate);
                 },
-                "-j" | "--jit" => if action != Action::Execute {
-                    return Err("Option --translate or --jit was specified twice".to_string());
+                "-e" | "--execute" => if let Some(_) = action {
+                    return Err("Option --dump, --translate or --execute was specified twice".to_string());
                 } else {
-                    action = match try_opt!(args.next(), "Missing argument to --jit".to_string()).as_ref() {
-                        "aot"   => Action::Jit(JitStrategy::AoT),
-                        "sync"  => Action::Jit(JitStrategy::Sync),
-                        "async" => Action::Jit(JitStrategy::Async),
-                        a => return Err(format!("Unrecognized jit strategy {}", a))
-                    };
+                    action = Some(match try_opt!(args.next(), "Missing argument to --execute".to_string()).as_ref() {
+                        "ref" |   "reference"   => Action::Execute(Strategy::SimpleState),
+                        "big" |   "bigint"      => Action::Execute(Strategy::BigState),
+                        "opt" |   "optimized"   => Action::Execute(Strategy::FastState),
+                        "aot" |   "precompiled" => Action::Execute(Strategy::AoT),
+                        "sync" |  "synchronous" => Action::Execute(Strategy::Sync),
+                        "async" | "threaded"    => Action::Execute(Strategy::Async),
+                        a => return Err(format!("Unrecognized strategy {}", a))
+                    });
                 },
                 "--ignore-overflow" => if options.contains(IGNORE_OVERFLOW) {
                     return Err("Option --ignore-overflow was specified twice".to_string());
@@ -236,18 +233,85 @@ fn parse_args() -> Result<Args, String> {
                 } else {
                     options |= UNCHECKED_HEAP;
                 },
-                "-h" | "--help" => return Err("Usage: whitespacers INPUT [-h | -i INFILE | -o OUTFILE | [-t | -j] | -f FORMAT]
+                "--no-fallback" => if options.contains(NO_FALLBACK) {
+                    return Err("Option --no-fallback was specified twice".to_string());
+                } else {
+                    options |= NO_FALLBACK;
+                },
+                "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback]
 
+wsc - A really fast whitespace JIT-compiler.
+
+Required arguments:
+    PROGRAM                 The whitespace program to execute
 Options:
-    -h --help            Display this message
-    -d --debug  DUMPFILE Stores the resulting executable buffer from jitting to a file.
-    -p --perf            Prints performance information to stdout.
-    -i --input  INFILE   File to read input from (defaults to stdin)
-    -o --output OUTFILE  File to write output to (defaults to stdout)
-    -f --format FORMAT   Input file format. Supported options are [whitespace|ws|assembly|asm],
-                          the default is whitespace.
-    -t --translate       Translate the file from whitespace to assembly (or in reverse).
-    -j --jit STRATEGY    Execute the file using jit techniques. Options are [aot|sync|async]
+    -h --help               Display this message
+    -f --format  FORMAT     Input file format. The default is plain whitespace. Options are:
+        ws|whitespace       Plain whitespace.
+        asm|assembly        A human-readable assembly format. A description can be found below.
+    -i --input   INFILE     File to read input from (defaults to stdin)
+    -o --output  OUTFILE    File to write output to (defaults to stdout)
+    -e --execute STRATEGY   Execute the file using specific settings. This is the default using
+                             the precompiled setting. Options are as following:
+        ref|reference       Use a simple reference interpreter that falls back onto a bignum
+                             based interpreter.
+        opt|optimized       Use the reference interpreter with optimized data structures.
+        big|bigint          Use the bignum based fallback interpreter directly. This is the
+                             slowest option.
+        aot|precompiled     Compile the program into native code in advance, and then execute
+                             it using optimized datastructures. This is the fastest for short
+                             programs, or programs that have a long execution time. It falls back
+                             to the optimized interpreter and bignum interpreter when the native
+                             code encounters errors.
+        sync|synchronous    Similar to precompiled, but this implementation compiles code it
+                             encounters while interpreting. This is faster for large programs that
+                             only actually execute a small part of their code.
+        async|threaded      Similar to precompiled, but compiles code in a separate thread while
+                             already interpreting. It is faster on large programs.
+    -t --translate          Instead of executing, translate the file to/from assembly, and write
+                             the result to the specified output.
+    -d --dump    DUMPFILE   Just compiles the program into assembly and dumps the result into a
+                             file. This is mainly for debugging.
+    -p --perf               Prints performance information to stdout.
+    --ignore-overflow       Use wrapping arithmetic instead of switching to bignum-based
+                             interpretation when overflow occurs.
+    --unchecked-heap        By default the interpreter generates an error when a missing key is
+                             requested from the heap. As the behaviour of the reference
+                             implementation of this is somewhat inconsistent, this option
+                             configures the interpreter to return 0 instead.
+    --no-fallback           On overflow, generate an error instead of switching to a bignum
+                             interpreter.
+
+Assembly format:
+    
+The assembly format used by wsc is very nasm-like. It supports the following instructions:
+
+Stack manipulation - push INTEGER, dup, swap, copy INTEGER, pop, slide INTEGER
+Arithmetic         - add, sub, mul, div, mod
+Heap manipulation  - get, set
+Control flow       - label LABEL, call LABEL, jmp LABEL, jz LABEL, jn LABEL, ret, exit
+IO                 - pnum, pchr, inum, ichr
+
+instead of the label opcode, labels can also be declared using the more familiar \"LABEL:\" syntax.
+Comments are denoted using the ; symbol. Integers can be arbitrarily sized, but decimal only. Labels
+can consist out of all letters and underscore, and all but the first character can be a number.
+
+Below is an example program that prints the fibonacci sequence to stdout:
+
+----------------
+    push 1
+    push 1
+loop:
+    copy 0
+    add
+    dup
+    pnum
+    push 10
+    pchr
+    swap
+    jmp loop
+----------------
+
 ".to_string()),
                 "--" => {
                     pos_args.extend(args);
@@ -265,7 +329,7 @@ Options:
 
     // parse positional args
     let mut pos_args = pos_args.into_iter();
-    let program = try_opt!(pos_args.next(), "Missing required positional argument 'program'".to_string());
+    let program = try_opt!(pos_args.next(), "Missing required positional argument 'PROGRAM'".to_string());
     if let Some(x) = pos_args.next() {
         return Err(format!("Unexpected positional argument {}", x));
     }
@@ -276,8 +340,7 @@ Options:
         input: input,
         output: output,
         format: format.unwrap_or(FileFormat::Whitespace),
-        action: action,
-        debug: debug,
+        action: action.unwrap_or(Action::Execute(Strategy::AoT)),
         perf: perf
     })
 }

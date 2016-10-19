@@ -1,10 +1,12 @@
 use std::str;
-use std::fmt;
 use std::rc::Rc;
+use std::ops::Range;
 
-use program::{Program, Command, Integer, SourceLoc};
+use program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
+use ::WsParseError;
 
-impl<'a> Program<'a> {
+impl Program {
+    /// Disassemble a program into a human-readable whitespace assembly.
     pub fn disassemble(&self) -> String {
         use program::Command::*;
 
@@ -12,6 +14,7 @@ impl<'a> Program<'a> {
         for (index, command) in self.commands.iter().enumerate() {
             buffer.push_str(match *command {
                 Push {..} =>           "    push  ",
+                PushBig {..} =>        "    push  ",
                 Duplicate =>           "    dup",
                 Copy {..} =>           "    copy  ",
                 Swap =>                "    swap",
@@ -41,58 +44,64 @@ impl<'a> Program<'a> {
                     let label = locs[index].label.as_ref().unwrap();
                     format!("{}:", label)
                 } else {
-                    format!("{:>04}:", index)
+                    format!("_{:>04}:", index)
                 });
             }
             match *command {
-                Push {value: x} => buffer.push_str(&format!("{}\n", x)),
-                Copy {index: x} => buffer.push_str(&format!("{}\n", x)),
-                Slide {amount: x} => buffer.push_str(&format!("{}\n", x)),
+                Push {value: x} => buffer.push_str(&x.to_string()),
+                PushBig {value: ref x} => buffer.push_str(&x.to_string()),
+                Copy {index: x} => buffer.push_str(&x.to_string()),
+                Slide {amount: x} => buffer.push_str(&x.to_string()),
                 Call {index: x} |
                 Jump {index: x} |
                 JumpIfZero {index: x} |
                 JumpIfNegative {index: x} => buffer.push_str(
                     &if let Some(ref locs) = self.locs {
                         let label = locs[index].label.as_ref().unwrap();
-                        format!("{}\n", label)
+                        format!("{}", label)
                     } else {
-                        format!("{:>04}\n", x)
+                        format!("_{:>04}", x)
                     }),
-                _ => buffer.push_str("\n")
+                _ => ()
             };
+            buffer.push_str("\n");
         }
         buffer
     }
 
-    pub fn assemble(source: &'a str) -> Result<Program<'a>, String> {
+    /// Parse a program written in whitespace assembly into a program.
+    pub fn assemble(source: String) -> Result<Program, WsParseError> {
         // this is a bit more complex parser, we can't parse it in one go, need to tokenize
-        let tokens = try!(TokenizerState::tokenize(source));
-        let node = try!(parse(&tokens));
-        let (commands, locs) = try!(compile(node));
+        let (commands, locs) = {
+            let tokens = try!(TokenizerState::tokenize(&source));
+            let node = try!(parse(&source, &tokens));
+            try!(compile(node))
+        };
         let mut program = Program {
-            source: Some(source.as_bytes()),
+            source: Some(source.into_bytes()),
             commands: commands,
-            locs: Some(locs)
+            locs: Some(locs),
+            source_is_whitespace: false
         };
         try!(program.compile());
         Ok(program)
     }
 }
 
-/**
+/*
  * Code below tokenizes the input string
  */
 
 #[derive(Debug, Clone)]
 struct Token<'a> {
     data: TokenType<'a>,
-    loc:  TextLoc<'a>
+    loc:  TextLoc
 }
 
 #[derive(Debug, Clone)]
 enum TokenType<'a> {
     Name    {value: &'a str},
-    Integer {value: Integer},
+    Integer {value: SizedInteger},
     Newline,
     Comment,
     Colon,
@@ -101,10 +110,10 @@ enum TokenType<'a> {
 }
 
 #[derive(Debug, Clone)]
-struct TextLoc<'a> {
+struct TextLoc {
     line:   usize,
     column: usize,
-    text:   &'a str
+    span:   Range<usize>,
 }
 
 #[derive(Clone)]
@@ -138,7 +147,7 @@ impl<'a> Iterator for TokenizerState<'a> {
 }
 
 impl<'a> TokenizerState<'a> {
-    fn tokenize<'b>(source: &'b str) -> Result<Vec<Token<'b>>, String> {
+    fn tokenize<'b>(source: &'b str) -> Result<Vec<Token<'b>>, WsParseError> {
         let mut tokens = Vec::new();
         let mut state = TokenizerState {
             source: source.char_indices(),
@@ -208,15 +217,25 @@ impl<'a> TokenizerState<'a> {
                             _               => break
                         }
                     }
-                    TokenType::Integer {value: source[start.0 .. state.index].parse().unwrap()}
+                    TokenType::Integer {
+                        value: if let Ok(value) = source[start.0 .. state.index].parse::<Integer>() {
+                            SizedInteger::Small(value)
+                        } else if let Ok(value) = source[start.0 .. state.index].parse::<BigInteger>() {
+                            SizedInteger::Big(value)
+                        } else {
+                            unreachable!()
+                        }
+                    }
                 },
-                x => return Err(format!("Unrecognized symbol {} at line {}, column {}", x, state.line, state.column))
+                x => return Err(WsParseError::new(
+                    format!("Unrecognized symbol {}", x), state.index, state.line, state.column
+                ))
             };
             tokens.push(Token {
                 loc: TextLoc {
                     line: start.1,
                     column: start.2,
-                    text: &source[start.0 .. state.index]
+                    span: start.0 .. state.index
                 },
                 data: data
             });
@@ -225,7 +244,7 @@ impl<'a> TokenizerState<'a> {
             loc: TextLoc {
                 line: state.line,
                 column: state.column,
-                text: ""
+                span: state.index .. state.index
             },
             data: TokenType::End
         });
@@ -233,40 +252,58 @@ impl<'a> TokenizerState<'a> {
     }
 }
 
-/**
+/*
  * Code below constructs an Abstract Syntax Tree from the Token Stream
  */
 
 #[derive(Debug, Clone)]
 struct Node<'a> {
     data: NodeType<'a>,
-    loc: TextLoc<'a>
+    loc: TextLoc
 }
 
 #[derive(Debug, Clone)]
 enum NodeType<'a> {
-    Root    {nodes: Vec<Node<'a>>},
-    Label   {name: &'a str},
-    Op      {name: &'a str, args: Vec<Node<'a>>},
-    Name    {name: &'a str},
-    Integer {value: Integer}
+    Root       {nodes: Vec<Node<'a>>},
+    Label      {name: &'a str},
+    Op         {name: &'a str, args: Vec<Node<'a>>},
+    Name       {name: &'a str},
+    Integer    {value: SizedInteger},
 }
 
-#[derive(Debug, Clone)]
+impl<'a> NodeType<'a> {
+    fn as_type(&self) -> &'static str {
+        match *self {
+            NodeType::Name    {..} => "Name",
+            NodeType::Label   {..} => "Label",
+            NodeType::Integer {..} => "Integer",
+            _ => unreachable!()
+        }
+    }
+}
+
+#[derive(Debug)]
 enum ParseResult<'a: 'b, 'b> {
     Match(Node<'a>, &'b [Token<'a>]),
-    Err(String),
+    Err(WsParseError),
     None
 }
 
 macro_rules! parse {
-    ($f: ident, $t:ident) => (
+    ($f:ident, $t:ident) => (
         match $f($t) {
             ParseResult::Err(s) => return ParseResult::Err(s),
             ParseResult::Match(n, t) => {$t = t; Some(n)},
             ParseResult::None => None
         }
-    )
+    );
+    ($f:ident, $s:ident, $t:ident) => (
+        match $f($s, $t) {
+            ParseResult::Err(s) => return ParseResult::Err(s),
+            ParseResult::Match(n, t) => {$t = t; Some(n)},
+            ParseResult::None => None
+        }
+    );
 }
 
 macro_rules! token {
@@ -274,15 +311,15 @@ macro_rules! token {
     ($m:pat, $l:ident) => (Some(&Token {data: $m, loc: ref $l}));
 }
 
-fn parse<'a, 'b>(tokens: &'b [Token<'a>]) -> Result<Node<'a>, String> {
-    match parse_root(tokens) {
+fn parse<'a, 'b>(source: &str, tokens: &'b [Token<'a>]) -> Result<Node<'a>, WsParseError> {
+    match parse_root(source, tokens) {
         ParseResult::Err(s)         => Err(s),
         ParseResult::Match(node, _) => Ok(node),
         ParseResult::None           => unreachable!()
     }
 }
 
-fn parse_root<'a, 'b>(mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
+fn parse_root<'a, 'b>(source: &str, mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
     // matches line (NEWLINE + line) END
     // where line = Label * op ? COMMENT ?
     let mut nodes = Vec::new();
@@ -290,7 +327,7 @@ fn parse_root<'a, 'b>(mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
         while let Some(n) = parse!(parse_label, tail) {
             nodes.push(n);
         }
-        if let Some(n) = parse!(parse_op, tail) {
+        if let Some(n) = parse!(parse_op, source, tail) {
             nodes.push(n);
         }
         if let token!(TokenType::Comment) = tail.get(0) {
@@ -302,18 +339,22 @@ fn parse_root<'a, 'b>(mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
             tail = &tail[1 ..];
         }
 
-        if let token!(TokenType::End) = tail.get(0) {
+        if let token!(TokenType::End, l) = tail.get(0) {
             return ParseResult::Match(
                 Node {
                     data: NodeType::Root {nodes: nodes},
-                    loc: TextLoc {line: 1, column: 1, text: ""}
+                    loc: l.clone()
                 },
                 &tail[1..]
             );
         }
         // we should have hit end or parsed at least one newline. if we didn't do either our state should be the same.
         if items == tail.len() {
-            return ParseResult::Err(format!("Expected newline at {}", tail[0].loc));
+            let loc = &tail[0].loc;
+            return ParseResult::Err(WsParseError::new(
+                format!("Expected newline at {}", &source[loc.span.clone()]),
+                loc.span.start, loc.line, loc.column
+            ));
         }
     }
 }
@@ -340,7 +381,7 @@ fn parse_label<'a, 'b>(tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
     }
 }
 
-fn parse_op<'a, 'b>(mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
+fn parse_op<'a, 'b>(source: &str, mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
     // matches NAME (arg (COMMA arg) *) ?
     // where arg = integer | name
     let (op, loc) = if let token!(TokenType::Name {value}, l) = tail.get(0) {
@@ -374,7 +415,11 @@ fn parse_op<'a, 'b>(mut tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
             } else if let Some(n) = parse!(parse_integer, tail) {
                 n
             } else {
-                return ParseResult::Err("Expected argument".to_string());
+                let loc = &tail[0].loc;
+                return ParseResult::Err(WsParseError::new(
+                    format!("Expected argument at {}", &source[loc.span.clone()]),
+                    loc.span.start, loc.line, loc.column
+                ));
             }
         );
     }
@@ -404,10 +449,10 @@ fn parse_name<'a, 'b>(tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
 
 fn parse_integer<'a, 'b>(tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
     // matches INTEGER
-    if let token!(TokenType::Integer {value}, l) = tail.get(0) {
+    if let token!(TokenType::Integer {ref value}, l) = tail.get(0) {
         ParseResult::Match(
             Node {
-                data: NodeType::Integer {value: value},
+                data: NodeType::Integer {value: value.clone()},
                 loc: l.clone()
             },
             &tail[1..]
@@ -417,29 +462,35 @@ fn parse_integer<'a, 'b>(tail: &'b [Token<'a>]) -> ParseResult<'a, 'b> {
     }
 }
 
-/**
+/*
  * Code below deals with compiling the AST in a program
  */
 
 macro_rules! validate_type {
-    ($p:pat => $rv:expr, $a:ident[$i:expr]) => (
+    ($s:expr, $p:pat => $rv:expr, $a:ident[$i:expr], $loc:expr) => (
         if let $p = $a[$i].data {
             $rv
         } else {
-            return Err(format!("Argument {} type mismatch, expected {}, got {:?}", $i + 1, stringify!($p), $a[$i]))
+            return Err(WsParseError::new(
+                format!("Argument {} type mismatch, expected {}, got {}", $i + 1, $s, $a[$i].data.as_type()),
+                $loc.span.start, $loc.line, $loc.column
+            ));
         }
     );
 }
 
-fn validate_args(name: &str, args: &[Node], nargs: usize) -> Result<(), String> {
+fn validate_args(name: &str, args: &[Node], nargs: usize, loc: &TextLoc) -> Result<(), WsParseError> {
     if args.len() != nargs {
-        Err(format!("opcode {} called with {} arguments while expecting {}", name, args.len(), nargs))
+        Err(WsParseError::new(
+            format!("opcode {} called with {} arguments while expecting {}", name, args.len(), nargs),
+            loc.span.start, loc.line, loc.column
+        ))
     } else {
         Ok(())
     }
 }
 
-fn compile<'a>(root: Node<'a>) -> Result<(Vec<Command>, Vec<SourceLoc>), String> {
+fn compile<'a>(root: Node<'a>) -> Result<(Vec<Command>, Vec<SourceLoc>), WsParseError> {
     let nodes = match root {
         Node {data: NodeType::Root {nodes}, ..} => nodes,
         _ => panic!("Called compile on non-root node")
@@ -457,120 +508,144 @@ fn compile<'a>(root: Node<'a>) -> Result<(Vec<Command>, Vec<SourceLoc>), String>
             },
             NodeType::Op {name, ref args} => match name {
                 "push" => {
-                    try!(validate_args(name, args, 1));
-                    Command::Push {value: validate_type!(NodeType::Integer {value} => value, args[0])}
+                    try!(validate_args(name, args, 1, &node.loc));
+                    match *validate_type!("Integer", NodeType::Integer {ref value} => value, args[0], &node.loc) {
+                        SizedInteger::Big(ref value) => Command::PushBig {value: value.clone()},
+                        SizedInteger::Small(value) => Command::Push {value: value}
+                    }
                 },
                 "dup"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Duplicate
                 },
                 "copy" => {
-                    try!(validate_args(name, args, 1));
-                    let value = validate_type!(NodeType::Integer {value} => value, args[0]);
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let value = match *validate_type!("Integer", NodeType::Integer {ref value} => value, args[0], &node.loc) {
+                        SizedInteger::Small(value) => value,
+                        SizedInteger::Big(ref value) => return Err(WsParseError::new(
+                            format!("Copy argument too large: {}", value),
+                            node.loc.span.start, node.loc.line, node.loc.column
+                        ))
+                    };
                     if value < 0 {
-                        return Err(format!("Negative copy argument: {}", value))
+                        return Err(WsParseError::new(
+                            format!("Negative copy argument: {}", value),
+                            node.loc.span.start, node.loc.line, node.loc.column
+                        ))
                     }
                     Command::Copy {index: value as usize}
                 },
                 "swap" => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Swap
                 },
                 "pop"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Discard
                 },
                 "slide" => {
-                    try!(validate_args(name, args, 1));
-                    let value = validate_type!(NodeType::Integer {value} => value, args[0]);
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let value = match *validate_type!("Integer", NodeType::Integer {ref value} => value, args[0], &node.loc) {
+                        SizedInteger::Small(value) => value,
+                        SizedInteger::Big(ref value) => return Err(WsParseError::new(
+                            format!("Slide argument too large: {}", value),
+                            node.loc.span.start, node.loc.line, node.loc.column
+                        ))
+                    };
                     if value < 0 {
-                        return Err(format!("Negative slide argument: {}", value))
+                        return Err(WsParseError::new(
+                            format!("Negative slide argument: {}", value),
+                            node.loc.span.start, node.loc.line, node.loc.column
+                        ))
                     }
                     Command::Slide {amount: value as usize}
                 },
                 "add"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Add
                 },
                 "sub"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Subtract
                 },
                 "mul"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Multiply
                 },
                 "div"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Divide
                 },
                 "mod"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Modulo
                 },
                 "set"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Set
                 },
                 "get"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::Get
                 },
                 "lbl"  => {
-                    try!(validate_args(name, args, 1));
-                    let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let name = validate_type!("Name", NodeType::Name {name} => name, args[0], &node.loc).as_bytes();
                     label = Some(name.into());
                     Command::Label
                 },
                 "call" => {
-                    try!(validate_args(name, args, 1));
-                    let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let name = validate_type!("Name", NodeType::Name {name} => name, args[0], &node.loc).as_bytes();
                     label = Some(name.into());
                     Command::Call {index: 0}
                 },
                 "jmp"  => {
-                    try!(validate_args(name, args, 1));
-                    let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let name = validate_type!("Name", NodeType::Name {name} => name, args[0], &node.loc).as_bytes();
                     label = Some(name.into());
                     Command::Jump {index: 0}
                 },
                 "jz"   => {
-                    try!(validate_args(name, args, 1));
-                    let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let name = validate_type!("Name", NodeType::Name {name} => name, args[0], &node.loc).as_bytes();
                     label = Some(name.into());
                     Command::JumpIfZero {index: 0}
                 },
                 "jn"   => {
-                    try!(validate_args(name, args, 1));
-                    let name = validate_type!(NodeType::Name {name} => name, args[0]).as_bytes();
+                    try!(validate_args(name, args, 1, &node.loc));
+                    let name = validate_type!("Name", NodeType::Name {name} => name, args[0], &node.loc).as_bytes();
                     label = Some(name.into());
                     Command::JumpIfNegative {index: 0}
                 },
                 "ret"  => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::EndSubroutine
                 },
                 "exit" => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::EndProgram
                 },
                 "pchr" => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::PrintChar
                 },
                 "pnum" => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::PrintNum
                 },
                 "ichr" => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::InputChar
                 },
                 "inum" => {
-                    try!(validate_args(name, args, 0));
+                    try!(validate_args(name, args, 0, &node.loc));
                     Command::InputNum
                 },
-                op     => return Err(format!("Unrecognized opcode {}", op))
+                op     => return Err(WsParseError::new(
+                    format!("Unrecognized opcode {}", op),
+                    node.loc.span.start, node.loc.line, node.loc.column
+                ))
             },
             _ => unreachable!()
         };
@@ -578,20 +653,9 @@ fn compile<'a>(root: Node<'a>) -> Result<(Vec<Command>, Vec<SourceLoc>), String>
         locs.push(SourceLoc {
             line: node.loc.line,
             column: node.loc.column,
-            text: node.loc.text.as_bytes(),
+            span: node.loc.span.clone(),
             label: label.map(Rc::new)
         });
     }
     Ok((commands, locs))
-}
-
-/**
- * formatting code
- */
-
-impl<'a> fmt::Display for TextLoc<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "line {}, column {}: ", self.line, self.column));
-        f.write_str(self.text)
-    }
 }

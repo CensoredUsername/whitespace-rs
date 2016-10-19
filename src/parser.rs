@@ -1,5 +1,10 @@
+use num_bigint::Sign;
+
+use std::i64;
+
 use label::Label;
-use program::{Program, Command, Integer, SourceLoc};
+use program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
+use ::WsParseError;
 
 #[derive(Debug, Clone)]
 struct ParseState<'a> {
@@ -40,31 +45,80 @@ impl<'a> ParseState<'a> {
         ParseState {line: 1, column: 1, index: 0, item: None, buffer: buffer}
     }
 
-    fn parse_arg(&mut self) -> Result<Integer, String> {
-        let mut accum = 0isize;
+    fn parse_arg(&mut self) -> Result<SizedInteger, WsParseError> {
+        let mut accum = 0u64;
         let negative;
 
         // this could be rewritten to a while let loop if rust'd support while { } else { }
         negative = match self.next() {
-            Some(b'\n') => return Ok(0),
+            Some(b'\n') => return Ok(SizedInteger::Small(0)),
             Some(b'\t') => true,
             Some(b' ' ) => false,
-            None        => return Err("Hit EOF while expecting argument".to_string()),
+            None        => return Err(WsParseError::new("Hit EOF while expecting argument", self.index, self.line, self.column)),
             _           => unreachable!()
         };
 
+        loop {
+            match self.next() {
+                Some(byte) => {
+                    accum = accum << 1 | match byte {
+                        b'\n' => return Ok(SizedInteger::Small(if negative {
+                            -(accum as Integer)
+                        } else {
+                            accum as Integer
+                        })),
+                        b'\t' => 1,
+                        b' '  => 0,
+                        _     => unreachable!()
+                    };
+                    if accum > i64::MAX as u64 {
+                        break;
+                    }
+                }
+                None => return Err(WsParseError::new("Hit EOF while parsing argument", self.index, self.line, self.column))
+            }
+        }
+
+        // The only way we get here is if the upper bit of accum is set. This
+        // means that exactly two segments can be filled. Due to the way the ws
+        // format works we store in big-endian order first. Then the order is
+        // reversed, making the smallest digit the frontmost one. An extra 0 is
+        // added to the end, and the whole vector is shifted to make up for space
+        // left over in the smallest digit.
+        let mut segments: Vec<u32> = Vec::new();
+        segments.push((accum >> 32) as u32);
+        segments.push(accum as u32);
+
+        let mut bit = 31;
+        let mut accum = 0u32;
         while let Some(byte) = self.next() {
-            accum = accum << 1 | match byte {
-                b'\n' => return Ok(if negative {-accum} else {accum}),
+            accum |= match byte {
+                b'\n' => {
+                    segments.push(accum);
+                    segments.reverse();
+                    segments.push(0);
+                    bit += 1; // the amount we need to shift everything to align the lowest bit
+                    for i in 0..segments.len() - 1 {
+                        segments[i] = ((segments[i] as u64 | ((segments[i + 1] as u64)<< 32)) >> bit) as u32;
+                    };
+                    return Ok(SizedInteger::Big(BigInteger::new(if negative {Sign::Minus} else {Sign::Plus}, segments)));
+                },
                 b'\t' => 1,
                 b' '  => 0,
                 _     => unreachable!()
-            };
-        };
-        Err("Hit EOF while parsing argument".to_string())
+            } << bit;
+
+            if bit == 0 {
+                segments.push(accum);
+                bit = 32;
+                accum = 0;
+            }
+            bit -= 1;
+        }
+        Err(WsParseError::new("Hit EOF while parsing argument", self.index, self.line, self.column))
     }
 
-    fn parse_label(&mut self) -> Result<Label, String> {
+    fn parse_label(&mut self) -> Result<Label, WsParseError> {
         let mut label = Label::new();
 
         while let Some(byte) = self.next() {
@@ -75,122 +129,136 @@ impl<'a> ParseState<'a> {
                 _ => unreachable!()
             };
         }
-        Err("Hit EOF while parsing label".to_string())
+        Err(WsParseError::new("Hit EOF while parsing label", self.index, self.line, self.column))
     }
 }
 
-impl<'a> Program<'a> {
-    pub fn parse (code: &[u8]) -> Result<Program, String> {
+impl Program {
+    /// Parse a program written in whitespace to a format suitable
+    /// for execution.
+    pub fn parse(code: Vec<u8>) -> Result<Program, WsParseError> {
 
         let mut commands = Vec::<Command>::new();
         let mut sourcelocs = Vec::<SourceLoc>::new();
-        let mut state = ParseState::new(code);
+        {
+            let mut state = ParseState::new(&code);
 
-        let mut hash = 0;
-        let mut hash_length = 0;
+            let mut hash = 0;
+            let mut hash_length = 0;
 
-        let mut startline = 0usize;
-        let mut startcolumn = 0usize;
-        let mut startindex = 0usize;
+            let mut startline = 0usize;
+            let mut startcolumn = 0usize;
+            let mut startindex = 0usize;
 
-        while let Some(byte) = state.next() {
-            if hash_length == 0 {
-                startline   = state.line;
-                startcolumn = state.column;
-                startindex  = state.index;
+            while let Some(byte) = state.next() {
+                if hash_length == 0 {
+                    startline   = state.line;
+                    startcolumn = state.column;
+                    startindex  = state.index;
+                }
+
+                hash = hash * 3 + match byte {
+                    b' '  => 0,
+                    b'\t' => 1,
+                    b'\n' => 2,
+                    _     => unreachable!()
+                };
+
+                hash_length += 1;
+
+                let command = match (hash_length, hash) {
+                    (2, 0)  => match try!(state.parse_arg()) {
+                        SizedInteger::Small(value) => Command::Push {value: value},
+                        SizedInteger::Big(value) => Command::PushBig {value: value}
+                    },
+                    (3, 6)  => Command::Duplicate,
+                    (3, 3)  => match try!(state.parse_arg()) {
+                        SizedInteger::Small(value) => Command::Copy {index: value as usize},
+                        SizedInteger::Big(value) => return Err(WsParseError::new(format!("Copy argument too large: {}", value), startindex, startline, startcolumn))
+                    },
+                    (3, 7)  => Command::Swap,
+                    (3, 8)  => Command::Discard,
+                    (3, 5)  => match try!(state.parse_arg()) {
+                        SizedInteger::Small(value) => Command::Slide {amount: value as usize},
+                        SizedInteger::Big(value) => return Err(WsParseError::new(format!("Slide argument too large: {}", value), startindex, startline, startcolumn))
+                    },
+
+                    (4, 27) => Command::Add,
+                    (4, 28) => Command::Subtract,
+                    (4, 29) => Command::Multiply,
+                    (4, 30) => Command::Divide,
+                    (4, 31) => Command::Modulo,
+
+                    (3, 12) => Command::Set,
+                    (3, 13) => Command::Get,
+
+                    (3, 18) => Command::Label,
+                    (3, 19) => Command::Call {index: 0},
+                    (3, 20) => Command::Jump {index: 0},
+                    (3, 21) => Command::JumpIfZero {index: 0},
+                    (3, 22) => Command::JumpIfNegative {index: 0},
+                    (3, 23) => Command::EndSubroutine,
+                    (3, 26) => Command::EndProgram,
+
+                    (4, 45) => Command::PrintChar,
+                    (4, 46) => Command::PrintNum,
+                    (4, 48) => Command::InputChar,
+                    (4, 49) => Command::InputNum,
+
+                    (3, 4) | 
+                    (3, 11) | 
+                    (3, 14) | 
+                    (3, 17) | 
+                    (3, 24) | 
+                    (3, 25) | 
+                    (4, _) => {
+                        let mut buf = [0u8; 5];
+                        for i in 0 .. hash_length {
+                            buf[i] = hash % 3;
+                            hash /= 3;
+                        }
+
+                        let s = buf[..hash_length].iter().rev().map(|c| if *c == 0 {
+                            'S'
+                        } else if *c == 1 {
+                            'T'
+                        } else {
+                            'N'
+                        }).collect::<String>();
+
+                        return Err(WsParseError::new(format!("invalid command: {}", s), startindex, startline, startcolumn));
+                    },
+                    (_, _) => continue
+                };
+
+                hash = 0;
+                hash_length = 0;
+
+                let label = match command {
+                    Command::Label | Command::Call {..} | Command::Jump {..} |
+                    Command::JumpIfZero {..} | Command::JumpIfNegative {..} => Some(try!(state.parse_label()).into()),
+                    _ => None
+                };
+
+                commands.push(command);
+                sourcelocs.push(SourceLoc {
+                    line: startline,
+                    column: startcolumn,
+                    span: startindex .. state.index + 1,
+                    label: label
+                });
             }
 
-            hash = hash * 3 + match byte {
-                b' '  => 0,
-                b'\t' => 1,
-                b'\n' => 2,
-                _     => unreachable!()
-            };
-
-            hash_length += 1;
-
-            let command = match (hash_length, hash) {
-                (2, 0)  => Command::Push {value: try!(state.parse_arg())},
-                (3, 6)  => Command::Duplicate,
-                (3, 3)  => Command::Copy {index: try!(state.parse_arg()) as usize},
-                (3, 7)  => Command::Swap,
-                (3, 8)  => Command::Discard,
-                (3, 5)  => Command::Slide {amount: try!(state.parse_arg()) as usize},
-
-                (4, 27) => Command::Add,
-                (4, 28) => Command::Subtract,
-                (4, 29) => Command::Multiply,
-                (4, 30) => Command::Divide,
-                (4, 31) => Command::Modulo,
-
-                (3, 12) => Command::Set,
-                (3, 13) => Command::Get,
-
-                (3, 18) => Command::Label,
-                (3, 19) => Command::Call {index: 0},
-                (3, 20) => Command::Jump {index: 0},
-                (3, 21) => Command::JumpIfZero {index: 0},
-                (3, 22) => Command::JumpIfNegative {index: 0},
-                (3, 23) => Command::EndSubroutine,
-                (3, 26) => Command::EndProgram,
-
-                (4, 45) => Command::PrintChar,
-                (4, 46) => Command::PrintNum,
-                (4, 48) => Command::InputChar,
-                (4, 49) => Command::InputNum,
-
-                (3, 4) | 
-                (3, 11) | 
-                (3, 14) | 
-                (3, 17) | 
-                (3, 24) | 
-                (3, 25) | 
-                (4, _) => {
-                    let mut buf = [0u8; 5];
-                    for i in 0 .. hash_length {
-                        buf[i] = hash % 3;
-                        hash /= 3;
-                    }
-
-                    let s = buf[..hash_length].iter().rev().map(|c| if *c == 0 {
-                        'S'
-                    } else if *c == 1 {
-                        'T'
-                    } else {
-                        'N'
-                    }).collect::<String>();
-
-                    return Err(format!("invalid command at line {}, column {}: {}", startline, startcolumn, s));
-                },
-                (_, _) => continue
-            };
-
-            hash = 0;
-            hash_length = 0;
-
-            let label = match command {
-                Command::Label | Command::Call {..} | Command::Jump {..} |
-                Command::JumpIfZero {..} | Command::JumpIfNegative {..} => Some(try!(state.parse_label()).into()),
-                _ => None
-            };
-
-            commands.push(command);
-            sourcelocs.push(SourceLoc {
-                line: startline,
-                column: startcolumn,
-                text: &code[startindex .. state.index + 1],
-                label: label
-            });
-        }
-
-        if hash_length != 0 {
-            return Err("Hit EOF while parsing command".to_string());
+            if hash_length != 0 {
+                return Err(WsParseError::new("Hit EOF while parsing command", state.index, state.line, state.column));
+            }
         }
 
         let mut program = Program {
             source: Some(code),
             commands: commands,
-            locs: Some(sourcelocs)
+            locs: Some(sourcelocs),
+            source_is_whitespace: true
         };
 
         try!(program.compile());
@@ -198,60 +266,51 @@ impl<'a> Program<'a> {
         Ok(program)
     }
 
-    pub fn dump(&self, reconstruct: bool) -> Vec<u8> {
-        if let (false, Some(source)) = (reconstruct, self.source) {
-            Vec::from(source)
-        } else {
-            let mut buffer = Vec::<u8>::new();
-            if !reconstruct {
-                if let Some(ref locs) = self.locs {
-                    for loc in locs {
-                        buffer.extend(loc.text);
-                    }
-                    return buffer;
-                }
+    /// Serialize the internal representation back into a whitespace program.
+    pub fn dump(&self) -> Vec<u8> {
+        let mut buffer = Vec::<u8>::new();
+
+        use program::Command::*;
+        for (index, command) in self.commands.iter().enumerate() {
+            let (code, arg): (&[u8], _) = match *command {
+                Push {value}           => (b"  ", Some(number_to_ws(value))),
+                PushBig {ref value}    => (b"  ", Some(large_number_to_ws(value))),
+                Duplicate              => (b" \n ", None),
+                Copy {index}           => (b" \t ", Some(number_to_ws(index as Integer))),
+                Swap                   => (b" \n\t", None),
+                Discard                => (b" \n\n", None),
+                Slide {amount}         => (b" \t\n", Some(number_to_ws(amount as Integer))),
+                Add                    => (b"\t   ", None),
+                Subtract               => (b"\t  \t", None),
+                Multiply               => (b"\t  \n", None),
+                Divide                 => (b"\t \t ", None),
+                Modulo                 => (b"\t \t\t", None),
+                Set                    => (b"\t\t ", None),
+                Get                    => (b"\t\t\t", None),
+                Label                  => (b"\n  ", Some(label_to_ws(index))),
+                Call {index}           => (b"\n \t", Some(label_to_ws(index - 1))),
+                Jump {index}           => (b"\n \n", Some(label_to_ws(index - 1))),
+                JumpIfZero {index}     => (b"\n\t ", Some(label_to_ws(index - 1))),
+                JumpIfNegative {index} => (b"\n\t\t", Some(label_to_ws(index - 1))),
+                EndSubroutine          => (b"\n\t\n", None),
+                EndProgram             => (b"\n\n\n", None),
+                PrintChar              => (b"\t\n  ", None),
+                PrintNum               => (b"\t\n \t", None),
+                InputChar              => (b"\t\n\t ", None),
+                InputNum               => (b"\t\n\t\t", None),
+            };
+            buffer.extend(code);
+            if let Some(arg) = arg {
+                buffer.extend(arg);
             }
-            use program::Command::*;
-            for (index, command) in self.commands.iter().enumerate() {
-                let (code, arg): (&[u8], _) = match *command {
-                    Push {value}           => (b"  ", Some(number_to_ws(value))),
-                    Duplicate              => (b" \n ", None),
-                    Copy {index}           => (b" \t ", Some(number_to_ws(index as isize))),
-                    Swap                   => (b" \n\t", None),
-                    Discard                => (b" \n\n", None),
-                    Slide {amount}         => (b" \t\n", Some(number_to_ws(amount as isize))),
-                    Add                    => (b"\t   ", None),
-                    Subtract               => (b"\t  \t", None),
-                    Multiply               => (b"\t  \n", None),
-                    Divide                 => (b"\t \t ", None),
-                    Modulo                 => (b"\t \t\t", None),
-                    Set                    => (b"\t\t ", None),
-                    Get                    => (b"\t\t\t", None),
-                    Label                  => (b"\n  ", Some(label_to_ws(index))),
-                    Call {index}           => (b"\n \t", Some(label_to_ws(index - 1))),
-                    Jump {index}           => (b"\n \n", Some(label_to_ws(index - 1))),
-                    JumpIfZero {index}     => (b"\n\t ", Some(label_to_ws(index - 1))),
-                    JumpIfNegative {index} => (b"\n\t\t", Some(label_to_ws(index - 1))),
-                    EndSubroutine          => (b"\n\t\n", None),
-                    EndProgram             => (b"\n\n\n", None),
-                    PrintChar              => (b"\t\n  ", None),
-                    PrintNum               => (b"\t\n \t", None),
-                    InputChar              => (b"\t\n\t ", None),
-                    InputNum               => (b"\t\n\t\t", None),
-                };
-                buffer.extend(code);
-                if let Some(arg) = arg {
-                    buffer.extend(arg);
-                }
-            }
-            buffer
         }
+        buffer
     }
 }
 
 use std::mem::size_of;
 
-fn number_to_ws(mut n: isize) -> Vec<u8> {
+fn number_to_ws(mut n: Integer) -> Vec<u8> {
     let mut res = Vec::new();
     if n < 0 {
         n = -n;
@@ -274,6 +333,35 @@ fn number_to_ws(mut n: isize) -> Vec<u8> {
     }
     res.push(b'\n');
     res
+}
+
+fn large_number_to_ws(n: &BigInteger) -> Vec<u8> {
+    let mut res = Vec::new();
+    let (sign, bytes) = n.to_bytes_be();
+
+    match sign {
+        Sign::Minus  => res.push(b'\t'),
+        Sign::Plus   => res.push(b' '),
+        Sign::NoSign => {
+            res.push(b'\n');
+            return res;
+        }
+    }
+
+    let mut force = false;
+    for byte in bytes {
+        for n in 0..8 {
+            if byte & (1 << (7 - n)) != 0 {
+                force = true;
+                res.push(b'\t');
+            } else if force {
+                res.push(b' ');
+            }
+        }
+    }
+
+    res.push(b'\n');
+    return res;
 }
 
 fn label_to_ws(i: usize) -> Vec<u8> {

@@ -3,6 +3,10 @@
 *.sublime-*
 *.exe
 *.pdb
+*.ws
+*.wsa
+*.wsasm
+*.bin
 
 /target/
 Cargo.lock

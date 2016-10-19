@@ -1,26 +1,55 @@
 use dynasmrt::{self, DynasmApi, DynasmLabelApi, AssemblyOffset, DynamicLabel};
 use crossbeam;
-use fnv::FnvHasher;
+use num_bigint::Sign;
+use num_traits::{FromPrimitive, ToPrimitive};
 
-use std::mem;
 use std::{i32, i64, u8};
 use std::collections::HashMap;
 use std::cmp::{min, max};
-use std::ptr;
-use std::io::{self, BufRead, Write};
+use std::io::{BufRead, Write};
 use std::sync::mpsc;
-use std::fs::File;
-use std::path::Path;
-use std::hash::BuildHasherDefault;
+use std::fmt::Display;
+use std::str::FromStr;
 
-use program::{Program, Command, Integer};
-#[allow(unused_imports)]
-use super::{WsError, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP};
+use program::{Program, Command, Integer, BigInteger};
+use super::{WsError, WsErrorKind, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK};
+
+mod cached_map;
+use self::cached_map::{CacheEntry, CACHE_MASK};
+
+mod simple_state;
+use self::simple_state::SimpleState;
+
+mod jit_state;
+use self::jit_state::JitState;
+
+mod bigint_state;
+use self::bigint_state::BigIntState;
 
 
-/// This trait represents the API necessary to run
+pub trait CheckedArith : Sized + Clone + Default + Display + FromStr + ToString + From<i64> {
+    fn overflowing_add(&self, rhs: &Self) -> (Self, bool);
+
+    fn overflowing_sub(&self, rhs: &Self) -> (Self, bool);
+
+    fn overflowing_mul(&self, rhs: &Self) -> (Self, bool);
+
+    fn checked_div(&self, rhs: &Self) -> Option<Self>;
+
+    fn checked_rem(&self, rhs: &Self) -> Option<Self>;
+
+    fn is_zero(&self) -> bool;
+
+    fn is_negative(&self) -> bool;
+
+    fn from_u8(from: u8) -> Self;
+
+    fn into_u8(&self) -> Option<u8>;
+}
+
 pub trait State<'a> {
-    fn new(options: Options,input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> Self; 
+    type Var: CheckedArith;
+    type HeapIterator: Iterator<Item=(Self::Var, Self::Var)> + 'a;
 
     /// Return options for the interpreter
     fn options(&self) -> Options;
@@ -28,12 +57,14 @@ pub trait State<'a> {
     /// This method returns the index of the next command that is to be executed
     fn index(&mut self) -> &mut usize;
     /// Returns the stack of this state implementation. The stack is always assumed to be a Vec.
-    fn stack(&mut self) -> &mut Vec<Integer>;
+    fn stack(&mut self) -> &mut Vec<Self::Var>;
 
     /// Set a key on the heap.
-    fn set(&mut self, key: Integer, value: Integer);
+    fn set(&mut self, key: Self::Var, value: Self::Var);
     /// Get a key from the heap.
-    fn get(&self, key: Integer) -> Option<Integer>;
+    fn get(&self, key: &Self::Var) -> Option<&Self::Var>;
+    /// Iterate through the heap
+    fn iter_heap(&'a self) -> Self::HeapIterator;
 
     /// Push a value onto the callstack
     fn call(&mut self, retloc: usize);
@@ -46,140 +77,163 @@ pub trait State<'a> {
     fn output(&mut self) -> &mut Write;
 
     /// perform input/output functions on the program state
-    fn read_char(&mut self) -> Result<Integer, WsError> {
+    fn read_char(&mut self) -> Result<Self::Var, WsError> {
         let mut s = [0; 1];
-        try!(self.output().flush()          .map_err(|e| WsError::wrap(e, "Could not flush the output file")));
-        try!(self.input().read_exact(&mut s).map_err(|e| WsError::wrap(e, "Could not read from the input file")));
-        Ok(s[0] as Integer)
+        try!(self.output().flush()          .map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not flush the output file")));
+        try!(self.input().read_exact(&mut s).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not read from the input file")));
+        Ok(Self::Var::from_u8(s[0]))
     }
-    fn read_num(&mut self) -> Result<Integer, WsError> {
+    fn read_num(&mut self) -> Result<String, WsError> {
         let mut s = String::new();
-        try!(self.output().flush()         .map_err(|e| WsError::wrap(e, "Could not flush the output file")));
-        try!(self.input().read_line(&mut s).map_err(|e| WsError::wrap(e, "Could not read a line from the input file")));
-        s.trim().parse()                 .map_err(|e| WsError::wrap(e, "Expected a number to be entered"))
+        try!(self.output().flush()         .map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not flush the output file")));
+        try!(self.input().read_line(&mut s).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not read a line from the input file")));
+        Ok(s)
     }
-    fn write_char(&mut self, c: Integer) -> Result<(), WsError> {
-        if c > u8::MAX as Integer {
-            return Err(WsError::new("The value is too large to be printed as a character"));
+    fn write_char(&mut self, c: Self::Var) -> Result<(), WsError> {
+        if let Some(val) = c.into_u8() {
+            self.output().write_all(&[val]).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not write to the output file"))
+        } else {
+            Err(WsError::new(WsErrorKind::ParseError, "The value is too large to be printed as a character"))
         }
-        self.output().write_all(&[c as u8]).map_err(|e| WsError::wrap(e, "Could not write to the output file"))
     }
-    fn write_num(&mut self, c: Integer) -> Result<(), WsError> {
+    fn write_num(&mut self, c: Self::Var) -> Result<(), WsError> {
         let c = c.to_string();
-        self.output().write_all(c.as_bytes())        .map_err(|e| WsError::wrap(e, "Could not write to the output file"))
+        self.output().write_all(c.as_bytes()).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not write to the output file"))
     }
 
-    fn count_instruction(&mut self) {
+    fn count_instruction(&mut self) { }
+
+    fn push_large(&mut self, _: &BigInteger) -> Result<(), WsError> {
+        Err(WsError::new(WsErrorKind::Overflow, "A large integer was pushed"))
+    }
+
+    fn input_num(&mut self) -> Result<(), WsError> {
+        let s = try!(self.read_num());
+        let s = s.trim();
+        let value = try!(s.parse::<Self::Var>().map_err(|_| WsError::new(WsErrorKind::ParseError, "Expected a number to parse")));
+        let key = self.stack().pop().unwrap();
+        self.set(key, value);
+        Ok(())
     }
 
     /// Interprets the commands starting at the current command index until
     /// a control flow join is reached. The return value is false if the end
     /// of the program was reached
     fn interpret_block(&mut self, commands: &[Command]) -> Result<bool, WsError> {
-        use program::Command::*;
+        use ::program::Command::*;
+        let options = self.options();
+
         // interpret until we hit something that can cause a flow control convergence (jump, call, ret)
         while let Some(c) = commands.get(*self.index()) {
             let len = self.stack().len();
             self.count_instruction();
 
             match *c {
-                Push {value} => self.stack().push(value),
-                Duplicate => if let Some(&value) = self.stack().last() {
+                Push {ref value} => self.stack().push(value.clone().into()),
+                PushBig {ref value} => try!(self.push_large(value)),
+                Duplicate => if let Some(value) = self.stack().last().cloned() {
                     self.stack().push(value);
                 } else {
-                    return Err(WsError::new("Tried to duplicate but stack is empty"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Tried to duplicate but stack is empty"));
                 },
-                Copy {index} => if let Some(&value) = self.stack().get(index) {
+                Copy {index} => if let Some(value) = self.stack().get(index).cloned() {
                     self.stack().push(value);
                 } else {
-                    return Err(WsError::new("Tried to copy from outside the stack"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Tried to copy from outside the stack"));
                 },
                 Swap => if len > 1 {
                     self.stack().swap(len - 1, len - 2);
                 } else {
-                    return Err(WsError::new("Cannot swap with empty stack"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Cannot swap with empty stack"));
                 },
                 Discard => if let None = self.stack().pop() {
-                    return Err(WsError::new("Cannot pop from empty stack"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Cannot pop from empty stack"));
                 },
                 Slide {amount} => if len > amount {
-                    let top = self.stack()[len - 1];
+                    let top = self.stack().pop().unwrap();
                     self.stack().truncate(len - amount);
                     self.stack()[len - amount - 1] = top;
                 } else {
-                    return Err(WsError::new("Cannot discard more elements than items exist on stack"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Cannot discard more elements than items exist on stack"));
                 },
                 Add => if len > 1 {
-                    let (val, overflow) = self.stack()[len - 2].overflowing_add(self.stack()[len - 1]);
-                    if overflow && !self.options().contains(IGNORE_OVERFLOW) {
-                        let stack = self.stack();
-                        return Err(WsError::new(format!("Overflow during addition: {} + {}", stack[len - 2], stack[len - 1])));
+                    let stack = self.stack();
+                    let (val, overflow) = stack[len - 2].overflowing_add(&stack[len - 1]);
+                    if overflow && !options.contains(IGNORE_OVERFLOW) {
+                        return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during addition: {} + {}", &stack[len - 2], &stack[len - 1])));
                     }
-                    self.stack()[len - 2] = val;
-                    self.stack().pop();
+                    stack[len - 2] = val;
+                    stack.pop();
                 } else {
-                    return Err(WsError::new("Not enough items on stack to add"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to add"));
                 },
                 Subtract => if len > 1 {
-                    let (val, overflow) = self.stack()[len - 2].overflowing_sub(self.stack()[len - 1]);
-                    if overflow && !self.options().contains(IGNORE_OVERFLOW) {
-                        let stack = self.stack();
-                        return Err(WsError::new(format!("Overflow during subtraction: {} - {}", stack[len - 2], stack[len - 1])));
+                    let stack = self.stack();
+                    let (val, overflow) = stack[len - 2].overflowing_sub(&stack[len - 1]);
+                    if overflow && !options.contains(IGNORE_OVERFLOW) {
+                        return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during subtraction: {} - {}", &stack[len - 2], &stack[len - 1])));
                     }
-                    self.stack()[len - 2] = val;
-                    self.stack().pop();
+                    stack[len - 2] = val;
+                    stack.pop();
                 } else {
-                    return Err(WsError::new("Not enough items on stack to subtract"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to subtract"));
                 },
                 Multiply => if len > 1 {
-                    let (val, overflow) = self.stack()[len - 2].overflowing_mul(self.stack()[len - 1]);
-                    if overflow && !self.options().contains(IGNORE_OVERFLOW) {
-                        let stack = self.stack();
-                        return Err(WsError::new(format!("Overflow during multiplication: {} * {}", stack[len - 2], stack[len - 1])));
+                    let stack = self.stack();
+                    let (val, overflow) = stack[len - 2].overflowing_mul(&stack[len - 1]);
+                    if overflow && !options.contains(IGNORE_OVERFLOW) {
+                        return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during multiplication: {} * {}", &stack[len - 2], &stack[len - 1])));
                     }
-                    self.stack()[len - 2] = val;
-                    self.stack().pop();
+                    stack[len - 2] = val;
+                    stack.pop();
                 } else {
-                    return Err(WsError::new("Not enough items on stack to multiply"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to multiply"));
                 },
                 Divide => if len > 1 {
-                    // note: technically isize::MIN / -1 can overflow. Something to keep in mind when extending to arbitrary sized integers
-                    if let Some(val) = self.stack()[len - 2].checked_div(self.stack()[len - 1]) {
-                        self.stack()[len - 2] = val;
+                    let mut stack = self.stack();
+                    if let Some(val) = stack[len - 2].checked_div(&stack[len - 1]) {
+                        stack[len - 2] = val;
+                    } else if stack[len - 1].is_zero() {
+                        return Err(WsError::new(WsErrorKind::DivisionError, "Divide by zero"));
                     } else {
-                        return Err(WsError::new("Divide by zero"));
+                        return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during division: {} / {}", stack[len - 2], stack[len - 1])));
                     }
-                    self.stack().pop();
+                    stack.pop();
                 } else {
-                    return Err(WsError::new("Not enough items on stack to divide"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to divide"));
                 },
                 Modulo => if len > 1 {
-                    if let Some(val) = self.stack()[len - 2].checked_rem(self.stack()[len - 1]) {
-                        self.stack()[len - 2] = val;
+                    let mut stack = self.stack();
+                    if let Some(val) = stack[len - 2].checked_rem(&stack[len - 1]) {
+                        stack[len - 2] = val;
+                    } else if stack[len - 1].is_zero() {
+                        return Err(WsError::new(WsErrorKind::DivisionError, "Modulo by zero"));
                     } else {
-                        return Err(WsError::new("Modulo by zero"));
+                        return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during modulo: {} % {}", stack[len - 2], stack[len - 1])));
                     }
-                    self.stack().pop();
+                    stack.pop();
                 } else {
-                    return Err(WsError::new("Not enough items on stack to modulo"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to modulo"));
                 },
                 Set => if len > 1 {
                     let value = self.stack().pop().unwrap();
                     let key = self.stack().pop().unwrap();
                     self.set(key, value);
                 } else {
-                    return Err(WsError::new("Not enough items on stack to set value"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to set value"));
                 },
-                Get => if let Some(&last) = self.stack().last() {
-                    if let Some(value) = self.get(last) {
-                        self.stack()[len - 1] = value;
-                    } else if self.options().contains(UNCHECKED_HEAP) {
-                        self.stack()[len - 1] = 0;
+                Get => if let Some(last) = self.stack().pop() {
+                    if let Some(value) = self.get(&last).cloned() {
+                        self.stack().push(value);
+                    } else if options.contains(UNCHECKED_HEAP) {
+                        self.stack().push(Default::default());
                     } else {
-                        return Err(WsError::new(format!("Key does not exist on the heap: {}", last)));
+                        let err = Err(WsError::new(WsErrorKind::KeyError, format!("Key does not exist on the heap: {}", &last)));
+                        self.stack().push(last);
+                        return err;
                     }
                 } else {
-                    return Err(WsError::new("not enough items on stack to get value"));
+                    return Err(WsError::new(WsErrorKind::StackError, "not enough items on stack to get value"));
                 },
                 Label => {
                     *self.index() += 1;
@@ -195,279 +249,391 @@ pub trait State<'a> {
                     *self.index() = index;
                     return Ok(true);
                 },
-                JumpIfZero {index} => match self.stack().pop() {
-                    Some(0) => {
+                JumpIfZero {index} => if let Some(x) = self.stack().pop() {
+                    if x.is_zero() {
                         *self.index() = index;
                         return Ok(true);
-                    },
-                    None => {
-                        return Err(WsError::new("Not enough items on stack to test if zero"));
-                    },
-                    _ => ()
-                },
-                JumpIfNegative {index} => match self.stack().pop() {
-                    Some(x) if x < 0 => {
-                        *self.index() = index;
-                        return Ok(true);
-                    },
-                    None => {
-                        return Err(WsError::new("Not enough items on stack to test if negative"));
                     }
-                    _ => (),
+                } else {
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to test if zero"));
+                },
+                JumpIfNegative {index} => if let Some(x) = self.stack().pop() {
+                    if x.is_negative() {
+                        *self.index() = index;
+                        return Ok(true);
+                    }
+                } else {
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to test if negative"));
                 },
                 EndSubroutine => if let Some(index) = self.ret() {
                     *self.index() = index;
                     return Ok(true);
                 } else {
-                    return Err(WsError::new("Not enough items on callstack to return"));
+                    return Err(WsError::new(WsErrorKind::CallStackError, "Not enough items on callstack to return"));
                 },
                 EndProgram => return Ok(false),
                 PrintChar => if let Some(c) = self.stack().pop() {
                     try!(self.write_char(c));
                 } else {
-                    return Err(WsError::new("Not enough items on stack to print"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to print"));
                 },
                 PrintNum => if let Some(c) = self.stack().pop() {
                     try!(self.write_num(c));
                 } else {
-                    return Err(WsError::new("Not enough items on stack to print"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to print"));
                 },
                 InputChar => if len > 0 {
                     let c = try!(self.read_char());
                     let key = self.stack().pop().unwrap();
                     self.set(key, c);
                 } else {
-                    return Err(WsError::new("Not enough items on stack to input character"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to input character"));
                 },
                 InputNum => if len > 0 {
-                    let c = try!(self.read_char());
-                    let key = self.stack().pop().unwrap();
-                    self.set(key, c);
+                    try!(self.input_num());
                 } else {
-                    return Err(WsError::new("Not enough items on stack to input number"));
+                    return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to input number"));
                 }
             };
             *self.index() += 1;
         }
-        Err(WsError::new("Invalid program counter"))
+        Err(WsError::new(WsErrorKind::IOError, "Invalid program counter"))
     }
 }
 
-struct SimpleState<'a> {
+pub trait SmallIntState<'a> : State<'a, Var=Integer> {
+    fn into_bigintstate(&'a mut self) -> BigIntState<'a>;
+}
+
+impl CheckedArith for BigInteger {
+    fn overflowing_add(&self, rhs: &Self) -> (Self, bool) {
+        (self + rhs, false)
+    }
+
+    fn overflowing_sub(&self, rhs: &Self) -> (Self, bool) {
+        (self - rhs, false)
+    }
+
+    fn overflowing_mul(&self, rhs: &Self) -> (Self, bool) {
+        (self * rhs, false)
+    }
+
+    fn checked_div(&self, rhs: &Self) -> Option<Self> {
+        BigInteger::checked_div(self, rhs)
+    }
+
+    fn checked_rem(&self, rhs: &Self) -> Option<Self> {
+        if rhs.sign() == Sign::NoSign {
+            return None;
+        }
+        Some(self % rhs)
+    }
+
+    fn is_zero(&self) -> bool {
+        self.sign() == Sign::NoSign
+    }
+
+    fn is_negative(&self) -> bool {
+        self.sign() == Sign::Minus
+    }
+
+    fn from_u8(from: u8) -> Self {
+        <Self as FromPrimitive>::from_u8(from).unwrap()
+    }
+
+    fn into_u8(&self) -> Option<u8> {
+        self.to_u8()
+    }
+}
+
+impl CheckedArith for Integer {
+    fn overflowing_add(&self, rhs: &Self) -> (Self, bool) {
+        Integer::overflowing_add(*self, *rhs)
+    }
+
+    fn overflowing_sub(&self, rhs: &Self) -> (Self, bool) {
+        Integer::overflowing_sub(*self, *rhs)
+    }
+
+    fn overflowing_mul(&self, rhs: &Self) -> (Self, bool) {
+        Integer::overflowing_mul(*self, *rhs)
+    }
+
+    fn checked_div(&self, rhs: &Self) -> Option<Self> {
+        Integer::checked_div(*self, *rhs)
+    }
+
+    fn checked_rem(&self, rhs: &Self) -> Option<Self> {
+        Integer::checked_rem(*self, *rhs)
+    }
+
+    fn is_zero(&self) -> bool {
+        *self == 0
+    }
+
+    fn is_negative(&self) -> bool {
+        *self < 0
+    }
+
+    fn from_u8(from: u8) -> Self {
+        from as Self
+    }
+
+    fn into_u8(&self) -> Option<u8> {
+        if *self <= u8::MAX as Self && *self >= 0 {
+            Some(*self as u8)
+        } else {
+            None
+        }
+    }
+}
+
+
+/// A whitespace interpreter. This struct provides various strategies for interpreting a whitespace program.
+pub struct Interpreter<'a> {
+    program: &'a Program,
     options: Options,
-    count: usize,
-    index: usize,
-    stack: Vec<Integer>,
-    heap:  HashMap<Integer, Integer>,
-    callstack: Vec<usize>,
     input: &'a mut (BufRead + 'a),
     output: &'a mut (Write + 'a)
 }
 
-impl<'a> State<'a> for SimpleState<'a> {
-    fn new(options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> SimpleState<'a> {
-        SimpleState {
+impl<'a> Interpreter<'a> {
+    /// Construct a new whitespace interpreter from a program, input stream and output stream with the specified options.
+    pub fn new(program: &'a Program, options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> Interpreter<'a> {
+        Interpreter {
+            program: program,
             options: options,
-            count: 0,
-            index: 0,
-            callstack: Vec::new(),
-            heap: HashMap::new(),
-            stack: Vec::new(),
             input: input,
             output: output,
         }
     }
 
-    fn options(&self) -> Options {
-        self.options
-    }
-
-    fn index(&mut self) -> &mut usize {
-        &mut self.index
-    }
-
-    fn stack(&mut self) -> &mut Vec<Integer> {
-        &mut self.stack
-    }
-
-    fn set(&mut self, key: Integer, value: Integer) {
-        self.heap.insert(key, value);
-    }
-
-    fn get(&self, key: Integer) -> Option<Integer> {
-        self.heap.get(&key).cloned()
-    }
-
-    fn call(&mut self, retloc: usize) {
-        self.callstack.push(retloc);
-    }
-    fn ret(&mut self) -> Option<usize> {
-        self.callstack.pop()
-    }
-
-    fn input(&mut self) -> &mut BufRead {
-        self.input
-    }
-
-    fn output(&mut self) -> &mut Write {
-        self.output
-    }
-
-    fn count_instruction(&mut self) {
-        self.count += 1;
-    }
-}
-
-fn interpret<'a, T: State<'a>>(state: &mut T, program: &Program) -> Result<(), WsError> {
-    loop {
-        match state.interpret_block(&program.commands) {
-            Ok(true) => continue,
-            Ok(false) => return Ok(()),
-            Err(mut e) => {
-                e.set_location(*state.index());
-                return Err(e)
-            }
-        }
-    }
-}
-
-pub fn simple_interpret<'a>(program: &Program, options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> Result<(), WsError> {
-    let mut state = SimpleState::new(options, input, output);
-    try!(interpret(&mut state, program));
-    println!("evaluated {} instructions", state.count);
-    Ok(())
-}
-
-pub fn jit_interpret<'a>(program: &Program, options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> Result<(), WsError> {
-    let mut state = JitState::new(options, input, output);
-    try!(interpret(&mut state, program));
-    Ok(())
-}
-
-pub struct JitInterpreter<'a> {
-    pub state: JitState<'a>,
-    program: &'a Program<'a>,
-    compiler: JitCompiler<'a>,
-    jit_handles: Vec<Option<AssemblyOffset>>
-}
-
-impl<'a> JitInterpreter<'a> {
-    pub fn new(program: &'a Program, options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> JitInterpreter<'a> {
-        JitInterpreter {
-            state: JitState::new(options, input, output),
-            program: program,
-            compiler: JitCompiler::new(program, options),
-            jit_handles: vec![None; program.commands.len()]
-        }
-    }
-
-    pub fn precompile(&mut self) {
-        use program::Command::*;
-        if !self.program.commands.is_empty() {
-
-            for (i, c) in self.program.commands.iter().enumerate() {
-                let i = match *c {
-                    Label | Call {..} if i + 1 != self.program.commands.len() => i + 1,
-                    _ => continue
-                };
-                if let Some(start) = self.compiler.compile_index(i) {
-                    self.jit_handles[i] = Some(start);
+    fn interpret<'b, T: State<'b>>(state: &mut T, program: &Program) -> Result<(), WsError> {
+        loop {
+            match state.interpret_block(&program.commands) {
+                Ok(true) => continue,
+                Ok(false) => return Ok(()),
+                Err(mut e) => {
+                    e.set_location(*state.index());
+                    return Err(e)
                 }
             }
         }
-        self.compiler.commit();
     }
 
-    pub fn simple_jit(&mut self) -> Result<(), WsError> {
-        let executor = self.compiler.executor();
+    fn bigint_fallback<'b, T: SmallIntState<'b>>(state: &'b mut T, program: &Program, e: WsError) -> Result<(), WsError> {
+        match e {
+            WsError {kind: WsErrorKind::Overflow, ..} => {
+                let mut state = state.into_bigintstate();
+                Self::interpret(&mut state, program)
+            }
+            WsError {kind: WsErrorKind::InumOverflow(key, val), ..} => {
+                let mut state = state.into_bigintstate();
+                state.set(key.into(), val);
+                Self::interpret(&mut state, program)
+            }
+            e => Err(e)
+        }
+    }
+
+    /// The reference interpreter implementation. It uses simple data structures internally, falling back to
+    /// bignum-based simple datastructures if values become too large.
+    pub fn interpret_with_simple_state(&'a mut self) -> Result<(), WsError> {
+        let mut state = SimpleState::new(self.options, &mut self.input, &mut self.output);
+        match Self::interpret(&mut state, &self.program) {
+            Ok(()) => Ok(()),
+            Err(e) => if self.options.contains(NO_FALLBACK) {
+                Err(e)
+            } else {
+                Self::bigint_fallback(&mut state, &self.program, e)
+            }
+        }
+    }
+
+    /// Interprets the program with optimized data structures, falling back to
+    /// bignum-based simple datastructures if values become too large. 
+    pub fn interpret_with_fast_state(&'a mut self) -> Result<(), WsError> {
+        let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
+        match Self::interpret(&mut state, &self.program) {
+            Ok(()) => Ok(()),
+            Err(e) => if self.options.contains(NO_FALLBACK) {
+                Err(e)
+            } else {
+                Self::bigint_fallback(&mut state, &self.program, e)
+            }
+        }
+    }
+
+    /// Interpret the program using only bignum-based simple datastructures. This is slow.
+    pub fn interpret_with_bigint_state(&'a mut self) -> Result<(), WsError> {
+        let mut state = BigIntState::new(self.options, &mut self.input, &mut self.output);
+        Self::interpret(&mut state, &self.program)
+    }
+
+    /// Use a jit compiler that compiles the entire program in advance to execute
+    /// the program. It is backed by an optimized datastructure, and will fall back
+    /// to interpretation in unsafe situations. When values become too large it will
+    /// fall back to bignum-based interpretation.
+    #[cfg(target_arch = "x86_64")]
+    pub fn jit_aot(&mut self) -> Result<(), WsError> {
+        let program = &self.program;
+        let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
+        let mut compiler = JitCompiler::new(program, self.options);
+        let mut jit_handles = vec![None; program.commands.len()];
+
+        // first compile everything (except the starting block as there's no reason to do that)
+        use program::Command::*;
+        for (i, c) in program.commands.iter().enumerate() {
+            let i = match *c {
+                Label | Call {..} if i + 1 != program.commands.len() => i + 1,
+                _ => continue
+            };
+
+            if let Some(start) = compiler.compile_index(i) {
+                jit_handles[i] = Some(start);
+            }
+        }
+        compiler.commit();
+
+        // then run it
+        let executor = compiler.executor();
         let lock = executor.lock();
 
-        while let Some(&offset) = self.jit_handles.get(*self.state.index()) {
+        while let Some(&offset) = jit_handles.get(*state.index()) {
             // can we jit?
             if let Some(offset) = offset {
-                let new_index = unsafe {
-                    JitCompiler::run_block(lock.ptr(offset), &mut self.state)
-                };
+                let old_index = *state.index();
+
+                unsafe {
+                    state.run_block(lock.ptr(offset));
+                }
                 // if we exit on the same instruction as we started we need to try interpreting first 
                 // as otherwise we could get stuck in a loop due to stack errors
-                if new_index != *self.state.index() {
-                    *self.state.index() = new_index;
+                if old_index != *state.index() {
                     continue;
                 }
             }
 
-            // fallback interpreting. If this returns false we're finished
-            if ! try!(self.state.interpret_block(&self.program.commands)) {
-                return Ok(())
+            // fallback interpreting.
+            match state.interpret_block(&program.commands) {
+                Ok(true) => (),
+                Ok(false) => return Ok(()),
+                Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                    e.set_location(*state.index());
+                    return Err(e)
+                } else { 
+                    e.set_location(*state.index());
+                    return Self::bigint_fallback(&mut state, program, e)
+                }
             }
         }
 
-        Err(WsError::new("Invalid program counter"))
+        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
     }
 
-    pub fn synchronous_jit(&mut self) -> Result<(), WsError> {
-        let executor = self.compiler.executor();
+    /// Use a jit compiler that compiles code synchronously while executing
+    /// the program. It is backed by an optimized datastructure, and will fall back
+    /// to interpretation in unsafe situations. When values become too large it will
+    /// fall back to bignum-based interpretation.
+    #[cfg(target_arch = "x86_64")]
+    #[cfg(target_arch = "x86_64")]
+    pub fn jit_sync(&mut self) -> Result<(), WsError> {
+        let program = &self.program;
+        let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
+        let mut compiler = JitCompiler::new(program, self.options);
+        let mut jit_handles = vec![None; self.program.commands.len()];
+
+        let executor = compiler.executor();
         let mut lock = executor.lock();
 
         // avoid compiling the first part
-        if ! try!(self.state.interpret_block(&self.program.commands)) {
-            return Ok(());
+        match state.interpret_block(&program.commands) {
+            Ok(true) => (),
+            Ok(false) => return Ok(()),
+            Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                e.set_location(*state.index());
+                return Err(e)
+            } else {
+                e.set_location(*state.index());
+                return Self::bigint_fallback(&mut state, program, e)
+            }
         }
 
-        while let Some(&offset) = self.jit_handles.get(*self.state.index()) {
+        while let Some(&offset) = jit_handles.get(*state.index()) {
 
             // can we jit?
             if let Some(offset) = offset {
-                let new_index = unsafe {
+                let old_index = *state.index();
+                unsafe {
                     let lock = executor.lock();
-                    JitCompiler::run_block(lock.ptr(offset), &mut self.state)
-                };
+                    state.run_block(lock.ptr(offset));
+                }
                 // not a bail-out
-                if new_index != *self.state.index() {
-                    *self.state.index() = new_index;
+                if old_index != *state.index() {
                     continue;
                 }
-            } else if let Some(start) = self.compiler.compile_index(*self.state.index()) {
+
+            } else if let Some(start) = compiler.compile_index(*state.index()) {
                 drop(lock);
-                self.compiler.commit();
+                compiler.commit();
                 lock = executor.lock();
 
-                self.jit_handles[*self.state.index()] = Some(start);
-                let new_index = unsafe {
-                    JitCompiler::run_block(lock.ptr(start), &mut self.state)
-                };
+                let old_index = *state.index();
+                jit_handles[old_index] = Some(start);
+
+                unsafe {
+                    state.run_block(lock.ptr(start));
+                }
                 // not a bail-out
-                if new_index != *self.state.index() {
-                    *self.state.index() = new_index;
+                if old_index != *state.index() {
                     continue;
                 }
             }
 
-            // fallback interpreting. If this returns false we're finished
-            if ! try!(self.state.interpret_block(&self.program.commands)) {
-                return Ok(())
+            // fallback interpreting.
+            match state.interpret_block(&program.commands) {
+                Ok(true) => (),
+                Ok(false) => return Ok(()),
+                Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                    e.set_location(*state.index());
+                    return Err(e)
+                } else {
+                    e.set_location(*state.index());
+                    return Self::bigint_fallback(&mut state, program, e)
+                }
             }
         }
 
-        Err(WsError::new("Invalid program counter"))
+        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
     }
 
-    pub fn threaded_jit(&mut self) -> Result<(), WsError> {
-        use program::Command::*;
-        let executor = self.compiler.executor();
-
+    /// Use a jit compiler that compiles the program in a separate thread while executing
+    /// the program. It is backed by an optimized datastructure, and will fall back
+    /// to interpretation in unsafe situations. When values become too large it will
+    /// fall back to bignum-based interpretation.
+    #[cfg(target_arch = "x86_64")]
+    #[cfg(target_arch = "x86_64")]
+    pub fn jit_threaded(&mut self) -> Result<(), WsError> {
+        let program = &self.program;
+        let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
+        let mut compiler = JitCompiler::new(program, self.options);
+        let mut jit_handles = vec![None; program.commands.len()];
         let (jit_finished_send, jit_finished_receive) = mpsc::channel();
 
+        let executor = compiler.executor();
+
         // this thread compiles our code in the background.
-        let compiler = &mut self.compiler;
+        let compiler_borrow = &mut compiler;
         let _compile_thread = crossbeam::scope(|scope| scope.spawn(move || {
-            for (i, c) in compiler.commands.iter().enumerate() {
+            use program::Command::*;
+            for (i, c) in compiler_borrow.commands.iter().enumerate() {
                 let i = match *c {
-                    Label | Call {..} if i + 1 != compiler.commands.len() => i + 1,
+                    Label | Call {..} if i + 1 != compiler_borrow.commands.len() => i + 1,
                     _ => continue
                 };
-                if let Some(start) = compiler.compile_index(i) {
-                    compiler.commit();
+
+                if let Some(start) = compiler_borrow.compile_index(i) {
+                    compiler_borrow.commit();
                     if jit_finished_send.send((i, start)).is_err() {
                         break;
                     }
@@ -475,51 +641,83 @@ impl<'a> JitInterpreter<'a> {
             }
         }));
 
-        while let Some(&offset) = self.jit_handles.get(*self.state.index()) {
+        while let Some(&offset) = jit_handles.get(*state.index()) {
             // can we jit?
             if let Some(offset) = offset {
-                let new_index = unsafe {
+                let old_index = *state.index();
+
+                unsafe {
                     let lock = executor.lock();
-                    JitCompiler::run_block(lock.ptr(offset), &mut self.state)
-                };
+                    state.run_block(lock.ptr(offset));
+                }
                 // not a bail-out
-                if new_index != *self.state.index() {
-                    *self.state.index() = new_index;
+                if old_index != *state.index() {
                     continue;
                 }
             }
 
             // hot loop optimization: only check for new chunks when we fall back to interpreting.
             while let Ok((index, offset)) = jit_finished_receive.try_recv() {
-                self.jit_handles[index] = Some(offset);
+                jit_handles[index] = Some(offset);
             }
 
-            // fallback interpreting. If this returns false we're finished
-            match self.state.interpret_block(&self.program.commands) {
+            // fallback interpreting.
+            match state.interpret_block(&program.commands) {
                 Ok(true) => (),
                 Ok(false) => {
                     drop(jit_finished_receive);
                     return Ok(())
                 },
-                Err(e) => {
+                Err(mut e) => if self.options.contains(NO_FALLBACK) {
                     drop(jit_finished_receive);
-                    return Err(e)
+                    e.set_location(*state.index());
+                    return Err(e);
+                } else {
+                    drop(jit_finished_receive);
+                    e.set_location(*state.index());
+                    return Self::bigint_fallback(&mut state, program, e)
                 }
             }
         }
 
         // drop the channel so the compilation thread will terminate soon
         drop(jit_finished_receive);
-        Err(WsError::new("Invalid program counter"))
-    }
-
-    pub fn dump<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-        let mut f = try!(File::create(path));
-        let executor = self.compiler.executor();
-        let buf = executor.lock();
-        f.write_all(&buf)
+        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
     }
 }
+
+/// Returns a buffer containing the output of the compilation process of the
+/// specified program. This is mainly useful for debugging and optimizing the
+/// performance of the JIT compiler.
+#[cfg(target_arch = "x86_64")]
+pub fn debug_compile(program: &Program, options: Options) -> Vec<u8> {
+    let mut compiler = JitCompiler::new(&program, options);
+
+    // first compile everything (except the starting block as there's no reason to do that)
+    // if !program.commands.is_empty() {
+    //     compiler.compile_index(0);
+    // }
+
+    use program::Command::*;
+    for (i, c) in program.commands.iter().enumerate() {
+        let i = match *c {
+            Label | Call {..} if i + 1 != program.commands.len() => i + 1,
+            _ => continue
+        };
+
+        compiler.compile_index(i);
+    }
+    compiler.commit();
+
+    let executor = compiler.executor();
+    let mut retval = Vec::new();
+    retval.extend_from_slice(&executor.lock());
+    retval
+}
+
+
+
+
 
 // The used register allocation. This is here as allocator needs it
 dynasm!(ops
@@ -660,8 +858,7 @@ impl<'a> JitCompiler<'a> {
                         let mut top = 0;
                         allocator.stage(&mut self.ops).free(&mut top).finish();
                         dynasm!(self.ops
-                            ; mov temp0, QWORD value as i64
-                            ; mov Rq(top), temp0
+                            ; mov Rq(top), QWORD value as i64
                         );
                         allocator.set_offset(top, offset + 1);
                         (1i32, 1)
@@ -755,6 +952,11 @@ impl<'a> JitCompiler<'a> {
                             }
                         }
                     },
+                    PushBig {..} => {
+                        allocator.spill_forget(&mut self.ops);
+                        epilogue!(self.ops, stack_effect, command_index);
+                        break;
+                    },
                     Duplicate => { // note: I tried optimizing dup -> jz and dup -> jn but this actually benchmarked slower on my machine.
                         let mut lo = 0;
                         let mut hi = 0;
@@ -777,13 +979,14 @@ impl<'a> JitCompiler<'a> {
                         // have to spill everything as the copy can copy from loaded regs (and we can't check this at compile time)
                         let mut dest = 0;
                         allocator.spill_keep(&mut self.ops);
-                        allocator.stage(&mut self.ops).load(&mut dest, offset + 1).finish();
+                        allocator.stage(&mut self.ops).free(&mut dest).finish();
 
                         dynasm!(self.ops
                             ; mov temp0, [rsp + 0x40]
-                            ; mov temp0, temp0 => Integer[index as i32]
-                            ; mov Rq(dest), temp0
+                            ; mov Rq(dest), temp0 => Integer[index as i32]
                         );
+
+                        allocator.set_offset(dest, offset + 1);
                         // adjust min_stack if necessary
                         let stack_depth_needed = stack_effect - index as i32;
                         min_stack = min(stack_depth_needed, min_stack);
@@ -877,10 +1080,16 @@ impl<'a> JitCompiler<'a> {
                         allocator.stage(&mut self.ops).load(&mut left, offset - 1).load(&mut right, offset).finish();
                         dynasm!(self.ops
                             ; cmp Rq(right), BYTE 0
-                            ; jnz >div0
-                            ;; allocator.spill_error(&mut self.ops)
-                            ;; epilogue!(self.ops, stack_effect, command_index)
-                            ;div0:
+                            ; je BYTE >error
+                            ; cmp Rq(right), BYTE -1
+                            ; jne >correct
+                            ; mov temp0, QWORD i64::MIN
+                            ; cmp Rq(left), temp0
+                            ; jne >correct
+                            ;error:
+                            ;;allocator.spill_error(&mut self.ops)
+                            ;;epilogue!(self.ops, stack_effect, command_index)
+                            ;correct:
                             ; mov rax, Rq(left)
                             ; cqo
                             ; idiv Rq(right)
@@ -897,10 +1106,16 @@ impl<'a> JitCompiler<'a> {
                         allocator.stage(&mut self.ops).load(&mut left, offset - 1).load(&mut right, offset).finish();
                         dynasm!(self.ops
                             ; cmp Rq(right), BYTE 0
-                            ; jnz >div0
+                            ; je BYTE >error
+                            ; cmp Rq(right), BYTE -1
+                            ; jne >correct
+                            ; mov temp0, QWORD i64::MIN
+                            ; cmp Rq(left), temp0
+                            ; jne >correct
+                            ;error:
                             ;; allocator.spill_error(&mut self.ops)
                             ;; epilogue!(self.ops, stack_effect, command_index)
-                            ;div0:
+                            ;correct:
                             ; mov rax, Rq(left)
                             ; cqo
                             ; idiv Rq(right)
@@ -985,12 +1200,12 @@ impl<'a> JitCompiler<'a> {
                         if !self.options.contains(UNCHECKED_HEAP) {
                             dynasm!(self.ops
                                 ; test al, al
-                                ; jz >end
+                                ; jz BYTE >end
                                 ;;epilogue!(self.ops, stack_effect, command_index)
                             );
                         } else {
                             dynasm!(self.ops
-                                ; jmp >end
+                                ; jmp BYTE >end
                             );
                         }
                         dynasm!(self.ops
@@ -1170,14 +1385,18 @@ impl<'a> JitCompiler<'a> {
                     },
                     InputNum => {
                         allocator.spill_forget(&mut self.ops);
-                        dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::input_num, offset)
-                            ; test al, al
-                            ; jz >io_fail
-                            ;; epilogue!(self.ops, stack_effect, command_index)
-                            ;io_fail:
-                        );
-                        (-1, 0)
+                        epilogue!(self.ops, stack_effect, command_index);
+                        break;
+
+                        // allocator.spill_forget(&mut self.ops);
+                        // dynasm!(self.ops
+                        //     ;; call_extern!(self.ops, JitState::input_num, offset)
+                        //     ; test al, al
+                        //     ; jz >io_fail
+                        //     ;; epilogue!(self.ops, stack_effect, command_index)
+                        //     ;io_fail:
+                        // );
+                        // (-1, 0)
                     }
                 };
 
@@ -1255,277 +1474,5 @@ impl<'a> JitCompiler<'a> {
 
     fn executor(&self) -> dynasmrt::Executor {
         self.ops.reader()
-    }
-
-    unsafe fn run_block(ptr: *const u8, state: &mut JitState) -> usize {
-        let f: unsafe extern "win64" fn(*mut JitState) -> usize = mem::transmute(ptr);
-        let cont = f(state as *mut _);
-        let len = (state.stack.len() as isize + state.stack_change) as usize;
-        state.stack.set_len(len);
-        state.stack_change = 0;
-        cont
-    }
-}
-
-pub struct JitState<'a> {
-    options: Options,
-    command_index: usize,
-    callstack: Vec<RetLoc>,
-    heap: Cache,
-    heap_cache: *mut CacheEntry,
-    stack: Vec<Integer>,
-    stack_change: isize,
-    input: &'a mut (BufRead + 'a),
-    output: &'a mut (Write + 'a),
-    // This field only exists in order to fool LLVM's optimizer as the optimizer is actually producing
-    // worse code by trying to partially inline JitState::reserve into JitState::get_stack. As get_stack
-    // is called extremely often in code with flow control, it is vitally important that it is fast 
-    // (it is possible to spend almost 30% of the time in get_stack in flow-control heavy code).
-    // The problem is that even when reserve is marked as noinline and cold, the compiler will
-    // still detect that the end of the hot codepath of get_stack and reserve is similar, and
-    // try to deduplicate this code. This results in several extra register spills and no tail-call
-    // optimization of reserve in get_stack. However, by putting the address of reserve somewhere
-    // where llvm can't optimize its existence out, we force llvm to preserve the semantics of reserve
-    // which then causes the code for get_stack to be more optimal. This can result in over 10% faster code!
-    #[allow(dead_code)]
-    random_field_for_optimiziations_only: 
-        unsafe extern "win64" fn (&mut JitState, u64, usize, *mut *mut Integer) -> *mut Integer
-}
-
-struct RetLoc(usize, *const u8);
-
-impl<'a> State<'a> for JitState<'a> {
-    fn new(options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> JitState<'a> {
-        let mut heap = Cache::new();
-        let ptr  = heap.entries_ptr();
-        JitState {
-            options: options,
-            command_index: 0,
-            callstack: Vec::with_capacity(1024),
-            heap: heap,
-            heap_cache: ptr,
-            stack: Vec::with_capacity(1024),
-            stack_change: 0,
-            input: input,
-            output: output,
-            random_field_for_optimiziations_only: Self::reserve
-        }
-    }
-
-    fn options(&self) -> Options {
-        self.options
-    }
-
-    fn index(&mut self) -> &mut usize {
-        &mut self.command_index
-    }
-
-    fn stack(&mut self) -> &mut Vec<Integer> {
-        &mut self.stack
-    }
-
-    fn set(&mut self, key: Integer, value: Integer) {
-        self.heap.set(key, value);
-    }
-
-    fn get(&self, key: Integer) -> Option<Integer> {
-        self.heap.get(key)
-    }
-
-    fn call(&mut self, retloc: usize) {
-        self.callstack.push(RetLoc(retloc, ptr::null()));
-    }
-    fn ret(&mut self) -> Option<usize> {
-        self.callstack.pop().map(|RetLoc(retloc, _)| retloc)
-    }
-
-    fn input(&mut self) -> &mut BufRead {
-        self.input
-    }
-
-    fn output(&mut self) -> &mut Write {
-        self.output
-    }
-}
-
-impl<'a> JitState<'a> {
-    unsafe extern "win64" fn cache_bypass_get(state: *mut JitState, stack: *mut Integer) -> u8 {
-        if let Some(value) = (*state).heap.cache_bypass_get(*stack) {
-            *stack = value;
-            0
-        } else if (*state).options().contains(UNCHECKED_HEAP) {
-            *stack = 0;
-            0
-        } else {
-            1
-        }
-    }
-
-    unsafe extern "win64" fn get(state: *mut JitState, stack: *mut Integer) -> u8 {
-        if let Some(value) = (*state).heap.get(*stack) {
-            *stack = value;
-            0
-        } else {
-            1
-        }
-    }
-
-    unsafe extern "win64" fn set(state: *mut JitState, stack: *mut Integer) {
-        (*state).heap.set(*stack.offset(-1), *stack);
-    }
-
-    unsafe extern "win64" fn cache_evict(state: *mut JitState, stack: *mut Integer, entry: *mut CacheEntry, key: Integer) -> *mut CacheEntry {
-        (*state).heap.evict_entry(entry, key);
-        (*entry).key = key as usize | 1;
-        (*entry).value = *stack;
-        entry
-    }
-
-    unsafe extern "win64" fn input_num(state: *mut JitState, stack: *mut Integer) -> u8 {
-        if let Ok(c) = (*state).read_num() {
-            (*state).set(*stack, c);
-            0
-        } else {
-            1
-        }
-    }
-
-    unsafe extern "win64" fn print_num(state: *mut JitState, stack: *mut Integer) -> u8 {
-        (*state).write_num(*stack).is_err() as u8
-    }
-
-    unsafe extern "win64" fn input_char(state: *mut JitState, stack: *mut Integer) -> u8 {
-        if let Ok(c) = (*state).read_char() {
-            (*state).set(*stack, c);
-            0
-        } else {
-            1
-        }
-    }
-
-    unsafe extern "win64" fn print_char(state: *mut JitState, stack: *mut Integer) -> u8 {
-        (*state).write_char(*stack).is_err() as u8
-    }
-
-    unsafe extern "win64" fn call(state: *mut JitState, _stack: *mut Integer, index: usize, retptr: *const u8) {
-        (*state).callstack.push(RetLoc(index, retptr));
-    }
-
-    unsafe extern "win64" fn ret(state: *mut JitState, _stack: *mut Integer, fail_index: usize, ret_index: *mut usize) -> *const u8 {
-        if let Some(RetLoc(index, block_ptr)) = (*state).callstack.pop() {
-            if block_ptr.is_null() {
-                *ret_index = index;
-                ptr::null()
-            } else {
-                block_ptr
-            }
-        } else {
-            *ret_index = fail_index;
-            ptr::null()
-        }
-    }
-
-    unsafe extern "win64" fn get_stack(state: *mut JitState, min_stack: usize, max_stack: usize, stack_start: *mut *mut Integer) -> *mut Integer {
-        let state = &mut *state;
-
-        // fix the length of the stack and zero stack_change (only relevant when chained into as otherwise stack_change will be 0)
-        let len = (state.stack.len() as isize + state.stack_change) as usize;
-        state.stack.set_len(len);
-        state.stack_change = 0;
-
-        // ensure that the stack is at least min_stack items large
-        if len < min_stack {
-            return ptr::null_mut();
-        }
-        // ensure we will be able to push max_stack items
-        if len + max_stack <= state.stack.capacity() {
-            let start = state.stack.as_mut_ptr();
-            *stack_start = start;
-            start.offset(len as isize)
-        } else {
-            Self::reserve(state, mem::uninitialized(), max_stack, stack_start)
-        }
-    }
-
-    #[cold]
-    #[inline(never)]
-    unsafe extern "win64" fn reserve(state: &mut JitState, _: u64, max_stack: usize, stack_start: *mut *mut Integer) -> *mut Integer {
-        state.stack.reserve(max_stack);
-        let start = state.stack.as_mut_ptr();
-        *stack_start = start;
-        start.offset(state.stack.len() as isize)
-    }
-}
-
-struct Cache {
-    entries: Vec<CacheEntry>,
-    map: HashMap<usize, Integer, BuildHasherDefault<FnvHasher>>
-}
-
-#[derive(Debug, Clone)]
-struct CacheEntry {
-    key:   usize,
-    value: Integer
-}
-// Currently using 2^16 cache entries for about 1MB of space. 
-// idealy, the cache should be sized so it
-const CACHE_ENTRIES: usize = 0x10000;
-const CACHE_MASK:    usize = CACHE_ENTRIES - 1;
-
-impl Cache {
-    fn new() -> Cache {
-        use std::mem::size_of;
-        assert!(size_of::<CacheEntry>() == 1 << 4);
-
-        let fnv = BuildHasherDefault::<FnvHasher>::default();
-        Cache {
-            entries: vec![CacheEntry {key: 0, value: 0}; CACHE_ENTRIES],
-            map: HashMap::with_capacity_and_hasher(1024, fnv)
-        }
-    }
-
-    fn entries_ptr(&mut self) -> *mut CacheEntry {
-        self.entries.as_mut_ptr()
-    }
-
-    fn set(&mut self, key: Integer, value: Integer) {
-        let key = key as usize;
-
-        let mut entry = &mut self.entries[key & CACHE_MASK];
-
-        if entry.key == key | 1 {
-            // same key
-            entry.value = value;
-        } else {
-            // different key
-            if entry.key != 0 {
-                // filled entry
-                Self::_evict_entry(&mut self.map, entry, key);
-            }
-            entry.key = key | 1;
-            entry.value = value;
-        }
-    }
-
-    fn _evict_entry(map: &mut HashMap<usize, Integer, BuildHasherDefault<FnvHasher>>, entry: &CacheEntry, key: usize) {
-        let key = (entry.key & !CACHE_MASK) | (key & CACHE_MASK);
-        map.insert(key, entry.value);
-    }
-
-    unsafe fn evict_entry(&mut self, entry: *const CacheEntry, key: Integer) {
-        Self::_evict_entry(&mut self.map, &*entry, key as usize)
-    }
-
-    fn cache_bypass_get(&self, key: Integer) -> Option<Integer> {
-        self.map.get(&(key as usize)).cloned()
-    }
-
-    fn get(&self, key: Integer) -> Option<Integer> {
-        let entry = &self.entries[key as usize & CACHE_MASK];
-        if entry.key == key as usize | 1 {
-            Some(entry.value)
-        } else {
-            self.cache_bypass_get(key)
-        }
     }
 }
