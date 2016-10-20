@@ -38,7 +38,8 @@ enum Strategy {
     FastState,
     AoT,
     Sync,
-    Async
+    Async,
+    Count
 }
 
 fn main() {
@@ -114,7 +115,8 @@ fn console_main() -> Result<(), String> {
                         Strategy::FastState => interpreter.interpret_with_fast_state(),
                         Strategy::AoT => interpreter.jit_aot(),
                         Strategy::Sync => interpreter.jit_sync(),
-                        Strategy::Async => interpreter.jit_threaded()
+                        Strategy::Async => interpreter.jit_threaded(),
+                        Strategy::Count => interpreter.count_with_simple_state().map(|count| println!("Executed {} instructions", count))
                     }.map_err(|e| {e.format_with_program(&program)}));
                     time_finish = Instant::now();
                 },
@@ -177,7 +179,7 @@ fn parse_args() -> Result<Args, String> {
         match args.next() {
             Some(arg) => match arg.as_ref() {
                 "-d" | "--dump" => if let Some(_) = action {
-                    return Err("Option --dump, --translate or --execute was specified twice".to_string());
+                    return Err("Option --dump, --translate, --count or --execute was specified twice".to_string());
                 } else {
                     action = Some(Action::Dump(try_opt!(args.next(), "Missing argument to --dump".to_string())));
                 },
@@ -206,12 +208,17 @@ fn parse_args() -> Result<Args, String> {
                     };
                 },
                 "-t" | "--translate" => if let Some(_) = action {
-                    return Err("Option --dump, --translate or --execute was specified twice".to_string());
+                    return Err("Option --dump, --translate, --count or --execute was specified twice".to_string());
                 } else {
                     action = Some(Action::Translate);
                 },
+                "-c" | "--count" => if let Some(_) = action {
+                    return Err("Option --dump, --translate, --count or --execute was specified twice".to_string());
+                } else {
+                    action = Some(Action::Execute(Strategy::Count));
+                },
                 "-e" | "--execute" => if let Some(_) = action {
-                    return Err("Option --dump, --translate or --execute was specified twice".to_string());
+                    return Err("Option --dump, --translate, --count or --execute was specified twice".to_string());
                 } else {
                     action = Some(match try_opt!(args.next(), "Missing argument to --execute".to_string()).as_ref() {
                         "ref" |   "reference"   => Action::Execute(Strategy::SimpleState),
@@ -238,7 +245,7 @@ fn parse_args() -> Result<Args, String> {
                 } else {
                     options |= NO_FALLBACK;
                 },
-                "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback]
+                "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE | -c] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback]
 
 wsc - A really fast whitespace JIT-compiler.
 
@@ -268,6 +275,8 @@ Options:
                              only actually execute a small part of their code.
         async|threaded      Similar to precompiled, but compiles code in a separate thread while
                              already interpreting. It is faster on large programs.
+    -d --count              Use the reference interpreter with no bignum fallback to count the amount
+                             of instructions executed.
     -t --translate          Instead of executing, translate the file to/from assembly, and write
                              the result to the specified output.
     -d --dump    DUMPFILE   Just compiles the program into assembly and dumps the result into a

@@ -436,6 +436,14 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// Similar to Interpreter::interpret_with_simple_state but does not have bigint fallback
+    /// and returns the amount of executed instructions on success.
+    pub fn count_with_simple_state(&'a mut self) -> Result<usize, WsError> {
+        let mut state = SimpleState::new(self.options, &mut self.input, &mut self.output);
+        try!(Self::interpret(&mut state, &self.program));
+        Ok(state.count)
+    }
+
     /// The reference interpreter implementation. It uses simple data structures internally, falling back to
     /// bignum-based simple datastructures if values become too large.
     pub fn interpret_with_simple_state(&'a mut self) -> Result<(), WsError> {

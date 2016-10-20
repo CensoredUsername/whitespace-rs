@@ -160,6 +160,7 @@ impl WsError {
         self.location = Some(index);
     }
 
+    /// Provide a nice error message using information stored in the program structure
     pub fn format_with_program(&self, program: &Program) -> String {
         if let Some(index) = self.location {
             if let Some(ref locs) = program.locs {
