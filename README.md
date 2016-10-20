@@ -1,13 +1,44 @@
-# A [whitespace](https://web.archive.org/web/20150623025348/http://compsoc.dur.ac.uk/whitespace/) jit compiler, written in [Rust](https://www.rust-lang.org/)
+# A [whitespace](https://web.archive.org/web/20150623025348/http://compsoc.dur.ac.uk/whitespace/) JIT compiler, written in [Rust](https://www.rust-lang.org/)
 
 ## Features
-- Fast: Able to parse and run [this program](https://web.archive.org/web/20150612005338/http://compsoc.dur.ac.uk/whitespace/quine-copy.ws) in a tenth of a second (executing 7776282 whitespace commands) on an average computer.
-- Assembler: Convert whitespace code back and forth between an assembly language and whitespace.
-- Safe: The program can either use a fully safe interpreter, or an unsafe jit compiler. And even then the jit compiler rigurously checks it's inputs to ensure safety.
+
+- Provides both a library for embedding and a command-line tool.
+- Implements the whole whitespace standard, including arbitrary precision integers.
+- Extremely fast. Whitespace code can be compiled to near-native speed levels. Executing over a billion whitespace instructions per second is common.
+- Provides options for interpretation for unclear parts of the standard.
+- Can convert whitespace code to/from a readable assembly language.
 
 ## Why
+
 - I needed a project to learn Rust with.
 - Every language needs a whitespace interpreter!
+- I ended up overdoing it a bit.
+
+## Benchmarks:
+
+These benchmarks were created by executing [wsinterws.ws](https://github.com/hostilefork/whitespacers/blob/master/whitespace/wsinterws.ws) (a whitespace interpreter written in whitespace) on [this](https://web.archive.org/web/20150612005338/http://compsoc.dur.ac.uk/whitespace/quine-copy.ws) whitespace program. Correct execution requires the execution of 3.329.985.013 whitespace instructions. Executing this program requires --unchecked-heap.
+
+The time mentioned is purely the execution time. Other operations are very insignificant compared to it as the second largest time consumer is parsing at approximately 0.001 s.
+
+The used machine for benchmarking is a 2.6 GHz i7-4720HQ.
+
+Execution tactic | Time [s]      | whitespace instructions per second
+:----------------|--------------:|---------------------:
+A bignum-only interpreter | 193.514444790 |    17.207.940
+A reference interpreter   | 35.265381255  |    94.426.457
+An optimized interpreter  | 12.077388375  |   275.720.620
+JIT-compilation           | 3.311839939   | 1.005.478.849
+
+It should however be noted that this benchmark is heap-heavy code. In pure stack code speeds in excess of 3.000.000.000 instructions per second have been reached.
+
+## Documentation
+
+Documentation is available [here](https://censoredusername.github.io/whitespace-rs/whitespacers/index.html).
+
+## Build instructions
+
+Just run `cargo run --release` to run the interpreter. The library can also be downloaded directly from [crates.io](https://crates.io/crates/whitespacers).
 
 ## License
-WTFPL - http://www.wtfpl.net/
+
+MPL-2.9, see LICENSE

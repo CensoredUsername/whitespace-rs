@@ -3,6 +3,15 @@ name = "whitespacers"
 version = "0.0.1"
 authors = [ "CensoredUsername cens.username@gmail.com" ]
 
+description = "A whitespace JIT-compiler, for when your whitespace just isn't executing fast enough."
+
+documentation = "https://censoredusername.github.io/whitespace-rs/whitespacers/index.html"
+repository = "https://github.com/CensoredUsername/whitespace-rs"
+
+readme = "../README.md"
+keywords = ["whitespace", "wsc"]
+license = "MPL-2.0"
+
 [lib]
 name = "whitespacers"
 path = "src/lib.rs"
