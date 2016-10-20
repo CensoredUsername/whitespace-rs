@@ -41,4 +41,4 @@ Just run `cargo run --release` to run the interpreter. The library can also be d
 
 ## License
 
-MPL-2.9, see LICENSE
+MPL-2.0, see LICENSE
