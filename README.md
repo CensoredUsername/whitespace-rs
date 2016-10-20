@@ -16,18 +16,18 @@
 
 ## Benchmarks:
 
-These benchmarks were created by executing [wsinterws.ws](https://github.com/hostilefork/whitespacers/blob/master/whitespace/wsinterws.ws) (a whitespace interpreter written in whitespace) on [this](https://web.archive.org/web/20150612005338/http://compsoc.dur.ac.uk/whitespace/quine-copy.ws) whitespace program. Correct execution requires the execution of 3.329.985.013 whitespace instructions. Executing this program requires --unchecked-heap.
+Whitespacers offers several interpretation methods. These benchmarks show the difference between the techniques and fallbacks. These benchmarks were created by executing [wsinterws.ws](https://github.com/hostilefork/whitespacers/blob/master/whitespace/wsinterws.ws) (a whitespace interpreter written in whitespace) on [this](https://web.archive.org/web/20150612005338/http://compsoc.dur.ac.uk/whitespace/quine-copy.ws) whitespace program. Correct execution requires the execution of 3.329.985.013 whitespace instructions. Executing this program requires --unchecked-heap.
 
 The time mentioned is purely the execution time. Other operations are very insignificant compared to it as the second largest time consumer is parsing at approximately 0.001 s.
 
 The used machine for benchmarking is a 2.6 GHz i7-4720HQ.
 
-Execution tactic | Time [s]      | whitespace instructions per second
-:----------------|--------------:|---------------------:
-A bignum-only interpreter | 193.514444790 |    17.207.940
-A reference interpreter   | 35.265381255  |    94.426.457
-An optimized interpreter  | 12.077388375  |   275.720.620
-JIT-compilation           | 3.311839939   | 1.005.478.849
+Execution tactic                | Time [s]      | whitespace instructions per second
+:-------------------------------|--------------:|----------------------------------:
+The fallback bignum interpreter | 193.514444790 |    17.207.940
+The reference interpreter       | 35.265381255  |    94.426.457
+Optimized interpretation        | 12.077388375  |   275.720.620
+JIT-compilation                 | 3.311839939   | 1.005.478.849
 
 It should however be noted that this benchmark is heap-heavy code. In pure stack code speeds in excess of 3.000.000.000 instructions per second have been reached.
 
