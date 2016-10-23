@@ -297,7 +297,7 @@ pub trait State<'a> {
             };
             *self.index() += 1;
         }
-        Err(WsError::new(WsErrorKind::IOError, "Invalid program counter"))
+        Err(WsError::new(WsErrorKind::IOError, format!("Invalid program counter: {}", self.index())))
     }
 }
 
@@ -536,7 +536,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        Err(WsError::new(WsErrorKind::InvalidIndex, format!("Invalid program counter: {}", state.index())))
     }
 
     /// Use a jit compiler that compiles code synchronously while executing
@@ -612,7 +612,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        Err(WsError::new(WsErrorKind::InvalidIndex, format!("Invalid program counter: {}", state.index())))
     }
 
     /// Use a jit compiler that compiles the program in a separate thread while executing
@@ -690,7 +690,7 @@ impl<'a> Interpreter<'a> {
 
         // drop the channel so the compilation thread will terminate soon
         drop(jit_finished_receive);
-        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        Err(WsError::new(WsErrorKind::InvalidIndex, format!("Invalid program counter: {}", state.index())))
     }
 }
 
@@ -729,11 +729,11 @@ pub fn debug_compile(program: &Program, options: Options) -> Vec<u8> {
 
 // The used register allocation. This is here as allocator needs it
 dynasm!(ops
-    ; .alias state, rcx
-    ; .alias stack, rdx // initialized after a call to get_stack
-    ; .alias retval, rax
-    ; .alias temp0, rax // rax is used as a general temp reg
-    // r8, r9, r10 and r11 are used as temp regs
+    ; .alias state, rdi
+    ; .alias stack, rsi // initialized after a call to get_stack
+    ; .alias retval0, rax // rax is used as a general temp reg
+    ; .alias retval1, rdx
+    // rcx, r8, r9, r10 and r11 are used as temp regs
 );
 
 mod allocator;
@@ -742,23 +742,23 @@ use self::allocator::RegAllocator;
 // some utility defines
 macro_rules! epilogue {
     ($ops:expr) => {dynasm!($ops
-        ; add rsp, BYTE 0x28
+        ; add rsp, BYTE 0x18
         ; ret
     )};
-    ($ops:expr, , $command_index:expr) => {dynasm!($ops
-        ; mov retval, DWORD $command_index as _
-        ; add rsp, BYTE 0x28
-        ; ret
-    )};
+    // ($ops:expr, , $command_index:expr) => {dynasm!($ops
+    //     ; mov retval0, DWORD $command_index as _
+    //     ; add rsp, BYTE 0x18
+    //     ; ret
+    // )};
     ($ops:expr, $stack_effect:expr, $command_index:expr) => {dynasm!($ops
-        ; mov retval, DWORD $command_index as _
-        ; add QWORD state => JitState.stack_change, DWORD $stack_effect as _
-        ; add rsp, BYTE 0x28
+        ; mov retval0, DWORD $command_index as _
+        ; mov retval1, DWORD $stack_effect as _
+        ; add rsp, BYTE 0x18
         ; ret
     )};
     ($ops:expr, $stack_effect:expr) => {dynasm!($ops
-        ; add QWORD state => JitState.stack_change, DWORD $stack_effect as _
-        ; add rsp, BYTE 0x28
+        ; mov retval1, DWORD $stack_effect as _
+        ; add rsp, BYTE 0x18
         ; ret
     )};
 }
@@ -766,10 +766,10 @@ macro_rules! epilogue {
 macro_rules! call_extern {
     ($ops:expr, $addr:expr, $offset:expr) => {dynasm!($ops
         ; lea stack, stack => Integer[$offset]
-        ; mov temp0, QWORD $addr as _
-        ; call temp0
-        ; mov state, [rsp + 0x30]
-        ; mov stack, [rsp + 0x38]
+        ; mov retval0, QWORD $addr as _
+        ; call retval0
+        ; mov state, [rsp + 0x10]
+        ; mov stack, [rsp]
     )}
 }
 
@@ -783,7 +783,7 @@ struct JitCompiler<'a> {
 }
 
 enum FixUp {
-    Jump(AssemblyOffset, AssemblyOffset),
+    Jump(AssemblyOffset, AssemblyOffset, i32),
     Lea(AssemblyOffset, AssemblyOffset)
 }
 
@@ -824,31 +824,29 @@ impl<'a> JitCompiler<'a> {
         self.blocks.insert(start_index, block);
         let stack_fixes;
         dynasm!(self.ops
-            ; sub rsp, BYTE 0x28
-            ; mov [rsp + 0x30], state // rcx
+            ; push state
+            ; sub rsp, BYTE 0x10
             ;=>block.chained
 
             // get the stack handle, bail out if we don't (this indicates that a stack error would occur)
+            // prep args for get stack (rdi is already set to state, rsi to stack_change). min_stack and max_stack are later fixed up
             ;; stack_fixes = self.ops.offset()
-
-            // prep args for get stack (rcx is already set to state). min_stack and max_stack are later fixed up
             ; mov rdx, 0
-            ; mov r8, 0
-            ; lea r9, [rsp + 0x40] // this is where stack_start will be stored
-            ; mov temp0, QWORD JitState::get_stack as _
-            ; call temp0
-            ; test retval, retval
+            ; mov rcx, 0
+            ; mov retval0, QWORD JitState::get_stack as _
+            ; call retval0
+            ; test retval0, retval0
             ; jnz >badstack
-        );
-        epilogue!(self.ops, 0, start_index);
-
-        dynasm!(self.ops
+            ; mov retval0, DWORD start_index as _
+            ; xor retval1, retval1
+            ;; epilogue!(self.ops)
             ;badstack:
             // restore state and put the stack ptr we got in memory
-            ; mov stack, retval
-            ; mov state, [rsp + 0x30]
-            ; mov [rsp + 0x38], stack
-            // we're done now. state, stack and stack_start are in memory, state and stack are in rcx and rdx
+            ; mov state, [rsp + 0x10]
+            ; mov stack, retval0
+            ; mov [rsp + 0x8], retval1
+            ; mov [rsp], retval0
+            // we're done now. state is at rsp + 0x10, stack_start at rsp + 0x80 and stack_top at rsp. Additionally state is in rdi and stack in rsi
         );
 
         // register allocation manager
@@ -879,21 +877,21 @@ impl<'a> JitCompiler<'a> {
                             Add => {
                                 let mut left = 0;
                                 allocator.stage(&mut self.ops).load(&mut left, offset).finish();
-                                if value == 1 {
-                                    dynasm!(self.ops; inc Rq(left));
-                                } else if value == -1 {
-                                    dynasm!(self.ops; dec Rq(left));
-                                } else {
-                                    dynasm!(self.ops; add Rq(left), value);
+                                match value {
+                                    1     => dynasm!(self.ops ; inc Rq(left)),
+                                    -1    => dynasm!(self.ops ; dec Rq(left)),
+                                    value => dynasm!(self.ops ; add Rq(left), value)
                                 }
                                 if !self.options.contains(IGNORE_OVERFLOW) {
-                                    dynasm!(self.ops
-                                        ; jno >overflow
-                                        ; sub Rq(left), value
-                                        ;; allocator.spill_error(&mut self.ops)
-                                        ;; epilogue!(self.ops, stack_effect, command_index)
-                                        ;overflow:
-                                    );
+                                    dynasm!(self.ops ; jno >overflow);
+                                    match value {
+                                        1     => dynasm!(self.ops ; dec Rq(left)),
+                                        -1    => dynasm!(self.ops ; inc Rq(left)),
+                                        value => dynasm!(self.ops ; sub Rq(left), value)
+                                    }
+                                    allocator.spill_error(&mut self.ops);
+                                    epilogue!(self.ops, stack_effect, command_index);
+                                    dynasm!(self.ops ;overflow:);
                                 }
                                 allocator.modify(left);
                                 commands.next();
@@ -903,20 +901,21 @@ impl<'a> JitCompiler<'a> {
                             Subtract => {
                                 let mut left = 0;
                                 allocator.stage(&mut self.ops).load(&mut left, offset).finish();
-                                if value == 1 {
-                                    dynasm!(self.ops; dec Rq(left));
-                                } else if value == -1 {
-                                    dynasm!(self.ops; inc Rq(left));
-                                } else {
-                                    dynasm!(self.ops; sub Rq(left), value);
+                                match value {
+                                    1     => dynasm!(self.ops ; dec Rq(left)),
+                                    -1    => dynasm!(self.ops ; inc Rq(left)),
+                                    value => dynasm!(self.ops ; sub Rq(left), value)
                                 }
                                 if !self.options.contains(IGNORE_OVERFLOW) {
-                                    dynasm!(self.ops
-                                        ; jno >overflow
-                                        ;; allocator.spill_error(&mut self.ops)
-                                        ;; epilogue!(self.ops, stack_effect, command_index)
-                                        ;overflow:
-                                    );
+                                    dynasm!(self.ops ; jno >overflow);
+                                     match value {
+                                        1     => dynasm!(self.ops ; inc Rq(left)),
+                                        -1    => dynasm!(self.ops ; dec Rq(left)),
+                                        value => dynasm!(self.ops ; add Rq(left), value)
+                                    }
+                                    allocator.spill_error(&mut self.ops);
+                                    epilogue!(self.ops, stack_effect, command_index);
+                                    dynasm!(self.ops ;overflow:);
                                 }
                                 allocator.modify(left);
                                 commands.next();
@@ -990,8 +989,8 @@ impl<'a> JitCompiler<'a> {
                         allocator.stage(&mut self.ops).free(&mut dest).finish();
 
                         dynasm!(self.ops
-                            ; mov temp0, [rsp + 0x40]
-                            ; mov Rq(dest), temp0 => Integer[index as i32]
+                            ; mov Rq(dest), [rsp + 0x8]
+                            ; mov Rq(dest), Rq(dest) => Integer[index as i32]
                         );
 
                         allocator.set_offset(dest, offset + 1);
@@ -1091,8 +1090,8 @@ impl<'a> JitCompiler<'a> {
                             ; je BYTE >error
                             ; cmp Rq(right), BYTE -1
                             ; jne >correct
-                            ; mov temp0, QWORD i64::MIN
-                            ; cmp Rq(left), temp0
+                            ; mov retval0, QWORD i64::MIN
+                            ; cmp Rq(left), retval0
                             ; jne >correct
                             ;error:
                             ;;allocator.spill_error(&mut self.ops)
@@ -1101,7 +1100,6 @@ impl<'a> JitCompiler<'a> {
                             ; mov rax, Rq(left)
                             ; cqo
                             ; idiv Rq(right)
-                            ; mov stack, [rsp + 0x38]
                             ; mov Rq(left), rax 
                         );
                         allocator.modify(left);
@@ -1117,8 +1115,8 @@ impl<'a> JitCompiler<'a> {
                             ; je BYTE >error
                             ; cmp Rq(right), BYTE -1
                             ; jne >correct
-                            ; mov temp0, QWORD i64::MIN
-                            ; cmp Rq(left), temp0
+                            ; mov retval0, QWORD i64::MIN
+                            ; cmp Rq(left), retval0
                             ; jne >correct
                             ;error:
                             ;; allocator.spill_error(&mut self.ops)
@@ -1128,7 +1126,6 @@ impl<'a> JitCompiler<'a> {
                             ; cqo
                             ; idiv Rq(right)
                             ; mov Rq(left), rdx
-                            ; mov stack, [rsp + 0x38]
                         );
                         allocator.modify(left);
                         allocator.forget(right);
@@ -1139,40 +1136,39 @@ impl<'a> JitCompiler<'a> {
                         // call_extern!(self.ops, JitState::set, offset);
 
                         let mut key = 0;
-                        let mut temp1 = 0;
                         // key is not flushed as we pass it by registers. value is flushed as we need to access it in cache_evict possibly
-                        allocator.stage(&mut self.ops).load(&mut key, offset - 1).free(&mut temp1).finish();
+                        allocator.stage(&mut self.ops).load(&mut key, offset - 1).finish();
                         allocator.forget(key);
                         allocator.spill_forget(&mut self.ops);
 
                         dynasm!(self.ops
                             // calculate cache entry location
-                            ; mov temp0, Rq(key)
-                            ; and temp0, CACHE_MASK as i32
-                            ; shl temp0, 4 // mul sizeof<CacheEntry>
-                            ; add temp0, state => JitState.heap_cache
+                            ; mov retval0, Rq(key)
+                            ; and retval0, CACHE_MASK as i32
+                            ; shl retval0, 4 // mul sizeof<CacheEntry>
+                            ; add retval0, state => JitState.heap_cache
                             // key | 1
-                            ; mov Rq(temp1), Rq(key)
-                            ; or  Rq(temp1), BYTE 1
+                            ; mov retval1, Rq(key)
+                            ; or  retval1, BYTE 1
                             // if entry.key == key | 1
-                            ; cmp temp0 => CacheEntry.key, Rq(temp1)
+                            ; cmp retval0 => CacheEntry.key, retval1
                             ; je >equal
                             // if entry.key == 0
-                            ; cmp QWORD temp0 => CacheEntry.key, BYTE 0
+                            ; cmp QWORD retval0 => CacheEntry.key, BYTE 0
                             ; je >zero
                             // cache_evict(state, stack, *entry, key)
-                            ; mov r9, Rq(key)
-                            ; mov r8, temp0
+                            ; mov rcx, Rq(key)
+                            ; mov rdx, retval0
                             // pushes the old entry into the hashmap, and puts the new entry (key from register, value from stack) into storage
                             ;;call_extern!(self.ops, JitState::cache_evict, offset)
                             ; jmp >end
                             // entry.key = key | 1
                             ;zero:
-                            ; mov temp0 => CacheEntry.key, Rq(temp1)
+                            ; mov retval0 => CacheEntry.key, retval1
                             // and finally copy the value over
                             ;equal:
-                            ; mov Rq(temp1), stack => Integer[offset]
-                            ; mov temp0 => CacheEntry.value, Rq(temp1)
+                            ; mov retval1, stack => Integer[offset]
+                            ; mov retval0 => CacheEntry.value, retval1
                             ;end:
                         );
                         (-2, 0)
@@ -1194,13 +1190,13 @@ impl<'a> JitCompiler<'a> {
 
                         dynasm!(self.ops
                             // calculate cache entry location
-                            ; mov temp0, Rq(key)
-                            ; and temp0, CACHE_MASK as i32
-                            ; shl temp0, 4 // mul sizeof<CacheEntry>
-                            ; add temp0, state => JitState.heap_cache
+                            ; mov retval0, Rq(key)
+                            ; and retval0, CACHE_MASK as i32
+                            ; shl retval0, 4 // mul sizeof<CacheEntry>
+                            ; add retval0, state => JitState.heap_cache
                             // if entry.key == key | 1
                             ; or  Rq(key), BYTE 1
-                            ; cmp temp0 => CacheEntry.key, Rq(key)
+                            ; cmp retval0 => CacheEntry.key, Rq(key)
                             ; je >equal
                             // not in cache
                             ;;call_extern!(self.ops, JitState::cache_bypass_get, offset)
@@ -1220,8 +1216,8 @@ impl<'a> JitCompiler<'a> {
                             // also not in the map leads to error branch
                             ;equal:
                             // read the value from cache and put it on top of the stack
-                            ; mov temp0, temp0 => CacheEntry.value
-                            ; mov stack => Integer[offset], temp0
+                            ; mov retval0, retval0 => CacheEntry.value
+                            ; mov stack => Integer[offset], retval0
                             ;end:
                         );
                         (0, 1)
@@ -1229,18 +1225,16 @@ impl<'a> JitCompiler<'a> {
                     // we're done here
                     Label => {
                         allocator.spill_forget(&mut self.ops);
-                        dynasm!(self.ops
-                            ; add QWORD state => JitState.stack_change, DWORD stack_effect
-                        );
                         let target = command_index + 1;
                         if let Some(block) = self.blocks.get(&target) {
                             dynasm!(self.ops
+                                ; mov stack, DWORD stack_effect
                                 ; jmp =>block.chained
                             );
                         } else {
                             let start = self.ops.offset();
-                            epilogue!(self.ops, , target);
-                            Self::add_fixup(&mut self.fixups, target, FixUp::Jump(start, self.ops.offset()));
+                            epilogue!(self.ops, stack_effect, target);
+                            Self::add_fixup(&mut self.fixups, target, FixUp::Jump(start, self.ops.offset(), stack_effect));
                         }
                         break;
                     },
@@ -1248,44 +1242,42 @@ impl<'a> JitCompiler<'a> {
                         allocator.spill_forget(&mut self.ops);
                         if let Some(block) = self.blocks.get(&(command_index + 1)) {
                             dynasm!(self.ops
-                                ; lea r9, [=>block.chained]
+                                ; lea rcx, [=>block.chained]
                             );
                         } else {
                             let start = self.ops.offset();
                             dynasm!(self.ops
-                                ; mov r9, 0
+                                ; mov rcx, 0
                             );
                             Self::add_fixup(&mut self.fixups, command_index + 1, FixUp::Lea(start, self.ops.offset()));
                         }
                         dynasm!(self.ops
-                            ; mov r8, command_index as i32 + 1
+                            ; mov rdx, command_index as i32 + 1
                             ;; call_extern!(self.ops, JitState::call, offset)
-                            ; add QWORD state => JitState.stack_change, DWORD stack_effect
                         );
                         if let Some(block) = self.blocks.get(&index) {
                             dynasm!(self.ops
+                                ; mov stack, stack_effect
                                 ; jmp =>block.chained
                             );
                         } else {
                             let start = self.ops.offset();
-                            epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
+                            epilogue!(self.ops, stack_effect, index);
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset(), stack_effect));
                         }
                         break;
                     },
                     Jump {index} => {
                         allocator.spill_forget(&mut self.ops);
-                        dynasm!(self.ops
-                            ; add QWORD state => JitState.stack_change, DWORD stack_effect
-                        );
                         if let Some(block) = self.blocks.get(&index) {
                             dynasm!(self.ops
+                                ; mov stack, stack_effect
                                 ; jmp =>block.chained
                             );
                         } else {
                             let start = self.ops.offset();
-                            epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
+                            epilogue!(self.ops, stack_effect, index);
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset(), stack_effect));
                         }
                         break;
                     },
@@ -1295,17 +1287,17 @@ impl<'a> JitCompiler<'a> {
                         dynasm!(self.ops
                             ; cmp Rq(top), BYTE 0
                             ; jnz >no_branch
-                            ;; allocator.spill_error(&mut self.ops)
-                            ; add QWORD state => JitState.stack_change, DWORD stack_effect - 1 // we pop a value of before returning
                         );
+                        allocator.spill_error(&mut self.ops);
                         if let Some(block) = self.blocks.get(&index) {
                             dynasm!(self.ops
+                                ; mov stack, stack_effect - 1 // we pop a value of before returning
                                 ; jmp =>block.chained
                             );
                         } else {
                             let start = self.ops.offset();
-                            epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
+                            epilogue!(self.ops, stack_effect - 1, index);
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset(), stack_effect - 1));
                         }
                         dynasm!(self.ops
                             ;no_branch:
@@ -1319,17 +1311,17 @@ impl<'a> JitCompiler<'a> {
                         dynasm!(self.ops
                             ; cmp Rq(top), BYTE 0
                             ; jge >no_branch
-                            ;; allocator.spill_error(&mut self.ops)
-                            ; add QWORD state => JitState.stack_change, DWORD stack_effect - 1 // we pop a value of before returning
                         );
+                        allocator.spill_error(&mut self.ops);
                         if let Some(block) = self.blocks.get(&index) {
                             dynasm!(self.ops
+                                ; mov stack, stack_effect - 1 // we pop a value of before returning
                                 ; jmp =>block.chained
                             );
                         } else {
                             let start = self.ops.offset();
-                            epilogue!(self.ops, , index);
-                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset()));
+                            epilogue!(self.ops, stack_effect - 1, index);
+                            Self::add_fixup(&mut self.fixups, index, FixUp::Jump(start, self.ops.offset(), stack_effect - 1));
                         }
                         dynasm!(self.ops
                             ;no_branch:
@@ -1340,16 +1332,15 @@ impl<'a> JitCompiler<'a> {
                     EndSubroutine => { // we have to dynamically determine if we're going back to the interpreter or compiled code
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ; add QWORD state => JitState.stack_change, DWORD stack_effect
-                            ; mov r8, command_index as i32
-                            ; lea r9, [rsp + 0x48]
+                            ; mov rdx, command_index as i32
                             ;; call_extern!(self.ops, JitState::ret, offset)
-                            ; test retval, retval
+                            ; test retval0, retval0
                             ; jz >interpret
-                            ; jmp retval
+                            ; mov stack, stack_effect
+                            ; jmp retval0
                             ;interpret:
-                            ; mov retval, [rsp + 0x48]
-                            ;; epilogue!(self.ops)
+                            ; mov retval0, retval1
+                            ;; epilogue!(self.ops, stack_effect)
                         );
                         break;
                     },
@@ -1427,7 +1418,7 @@ impl<'a> JitCompiler<'a> {
             ops.goto(stack_fixes);
             dynasm!(ops
                 ; mov rdx, -min_stack
-                ; mov r8, max_stack
+                ; mov rcx, max_stack
             );
         });
 
@@ -1449,14 +1440,15 @@ impl<'a> JitCompiler<'a> {
                     if let Some(mut fixups) = fixups.remove(&target) {
                         for fixup in fixups.drain(..) {
                             match fixup {
-                                FixUp::Jump(start, end) => dynasm!(ops
+                                FixUp::Jump(start, end, stack_effect) => dynasm!(ops
                                     ;; ops.goto(start)
+                                    ; mov rsi, stack_effect
                                     ; jmp =>label
                                     ;; ops.check(end)
                                 ),
                                 FixUp::Lea(start, end) => dynasm!(ops
                                     ;; ops.goto(start)
-                                    ; lea r9, [=>label]
+                                    ; lea rcx, [=>label]
                                     ;; ops.check(end)
                                 )
                             }

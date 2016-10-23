@@ -1,5 +1,6 @@
 #![feature(plugin)]
 #![plugin(dynasm)]
+#![feature(abi_sysv64)]
 extern crate dynasmrt;
 extern crate itertools;
 extern crate crossbeam;

@@ -16,7 +16,6 @@ pub struct JitState<'a> {
     heap: CachedMap,
     pub heap_cache: *mut CacheEntry,
     stack: Vec<Integer>,
-    pub stack_change: isize,
     input: &'a mut (BufRead + 'a),
     output: &'a mut (Write + 'a),
     // This field only exists in order to fool LLVM's optimizer as the optimizer is actually producing
@@ -30,8 +29,8 @@ pub struct JitState<'a> {
     // where llvm can't optimize its existence out, we force llvm to preserve the semantics of reserve
     // which then causes the code for get_stack to be more optimal. This can result in over 10% faster code!
     #[allow(dead_code)]
-    random_field_for_optimiziations_only: 
-        unsafe extern "win64" fn (&mut JitState, u64, usize, *mut *mut Integer) -> *mut Integer
+    random_field_for_optimizations_only: 
+        unsafe extern "sysv64" fn (&mut JitState, u64, u64, usize) -> (*mut Integer, *mut Integer)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,22 +124,21 @@ impl<'a> JitState<'a> {
             heap: heap,
             heap_cache: ptr,
             stack: Vec::with_capacity(1024),
-            stack_change: 0,
             input: input,
             output: output,
-            random_field_for_optimiziations_only: Self::reserve
+            random_field_for_optimizations_only: Self::reserve
         }
     }
 
     pub unsafe fn run_block(&mut self, ptr: *const u8) {
-        let f: unsafe extern "win64" fn(*mut JitState) -> usize = mem::transmute(ptr);
-        self.command_index = f(self as *mut _);
-        let len = (self.stack.len() as isize + self.stack_change) as usize;
+        let f: unsafe extern "sysv64" fn(*mut JitState, isize) -> (usize, isize) = mem::transmute(ptr);
+        let (command_index, stack_change) = f(self as *mut _, 0);
+        self.command_index = command_index;
+        let len = (self.stack.len() as isize + stack_change) as usize;
         self.stack.set_len(len);
-        self.stack_change = 0;
     }
 
-    pub unsafe extern "win64" fn cache_bypass_get(state: *mut JitState, stack: *mut Integer) -> u8 {
+    pub unsafe extern "sysv64" fn cache_bypass_get(state: *mut JitState, stack: *mut Integer) -> u8 {
         if let Some(&value) = (*state).heap.cache_bypass_get(*stack) {
             *stack = value;
             0
@@ -153,7 +151,7 @@ impl<'a> JitState<'a> {
     }
 
     #[allow(dead_code)]
-    pub unsafe extern "win64" fn get(state: *mut JitState, stack: *mut Integer) -> u8 {
+    pub unsafe extern "sysv64" fn get(state: *mut JitState, stack: *mut Integer) -> u8 {
         if let Some(&value) = (*state).heap.get(*stack) {
             *stack = value;
             0
@@ -163,22 +161,22 @@ impl<'a> JitState<'a> {
     }
 
     #[allow(dead_code)]
-    pub unsafe extern "win64" fn set(state: *mut JitState, stack: *mut Integer) {
+    pub unsafe extern "sysv64" fn set(state: *mut JitState, stack: *mut Integer) {
         (*state).heap.set(*stack.offset(-1), *stack);
     }
 
-    pub unsafe extern "win64" fn cache_evict(state: *mut JitState, stack: *mut Integer, entry: *mut CacheEntry, key: Integer) -> *mut CacheEntry {
+    pub unsafe extern "sysv64" fn cache_evict(state: *mut JitState, stack: *mut Integer, entry: *mut CacheEntry, key: Integer) -> *mut CacheEntry {
         (*state).heap.evict_entry(entry, key);
         (*entry).key = key as usize | 1;
         (*entry).value = *stack;
         entry
     }
 
-    pub unsafe extern "win64" fn print_num(state: *mut JitState, stack: *mut Integer) -> u8 {
+    pub unsafe extern "sysv64" fn print_num(state: *mut JitState, stack: *mut Integer) -> u8 {
         (*state).write_num(*stack).is_err() as u8
     }
 
-    pub unsafe extern "win64" fn input_char(state: *mut JitState, stack: *mut Integer) -> u8 {
+    pub unsafe extern "sysv64" fn input_char(state: *mut JitState, stack: *mut Integer) -> u8 {
         if let Ok(c) = (*state).read_char() {
             (*state).set(*stack, c);
             0
@@ -187,56 +185,46 @@ impl<'a> JitState<'a> {
         }
     }
 
-    pub unsafe extern "win64" fn print_char(state: *mut JitState, stack: *mut Integer) -> u8 {
+    pub unsafe extern "sysv64" fn print_char(state: *mut JitState, stack: *mut Integer) -> u8 {
         (*state).write_char(*stack).is_err() as u8
     }
 
-    pub unsafe extern "win64" fn call(state: *mut JitState, _stack: *mut Integer, index: usize, retptr: *const u8) {
+    pub unsafe extern "sysv64" fn call(state: *mut JitState, _stack: *mut Integer, index: usize, retptr: *const u8) {
         (*state).callstack.push(RetLoc(index, retptr));
     }
 
-    pub unsafe extern "win64" fn ret(state: *mut JitState, _stack: *mut Integer, fail_index: usize, ret_index: *mut usize) -> *const u8 {
+    pub unsafe extern "sysv64" fn ret(state: *mut JitState, _stack: *mut Integer, fail_index: usize) -> (*const u8, usize) {
         if let Some(RetLoc(index, block_ptr)) = (*state).callstack.pop() {
-            if block_ptr.is_null() {
-                *ret_index = index;
-                ptr::null()
-            } else {
-                block_ptr
-            }
+            (block_ptr, index)
         } else {
-            *ret_index = fail_index;
-            ptr::null()
+            (ptr::null(), fail_index)
         }
     }
 
-    pub unsafe extern "win64" fn get_stack(state: *mut JitState, min_stack: usize, max_stack: usize, stack_start: *mut *mut Integer) -> *mut Integer {
+    pub unsafe extern "sysv64" fn get_stack(state: *mut JitState, stack_change: isize, min_stack: usize, max_stack: usize) -> (*mut Integer, *mut Integer) {
         let state = &mut *state;
-
         // fix the length of the stack and zero stack_change (only relevant when chained into as otherwise stack_change will be 0)
-        let len = (state.stack.len() as isize + state.stack_change) as usize;
+        let len = (state.stack.len() as isize + stack_change) as usize;
         state.stack.set_len(len);
-        state.stack_change = 0;
 
         // ensure that the stack is at least min_stack items large
         if len < min_stack {
-            return ptr::null_mut();
+            return (ptr::null_mut(), mem::uninitialized());
         }
         // ensure we will be able to push max_stack items
         if len + max_stack <= state.stack.capacity() {
             let start = state.stack.as_mut_ptr();
-            *stack_start = start;
-            start.offset(len as isize)
+            (start.offset(len as isize), start)
         } else {
-            Self::reserve(state, mem::uninitialized(), max_stack, stack_start)
+            Self::reserve(state, mem::uninitialized(), mem::uninitialized(), max_stack)
         }
     }
 
     #[cold]
     #[inline(never)]
-    pub unsafe extern "win64" fn reserve(state: &mut JitState, _: u64, max_stack: usize, stack_start: *mut *mut Integer) -> *mut Integer {
+    pub unsafe extern "sysv64" fn reserve(state: &mut JitState, _: u64, _: u64, max_stack: usize) -> (*mut Integer, *mut Integer) {
         state.stack.reserve(max_stack);
         let start = state.stack.as_mut_ptr();
-        *stack_start = start;
-        start.offset(state.stack.len() as isize)
+        (start.offset(state.stack.len() as isize), start)
     }
 }
