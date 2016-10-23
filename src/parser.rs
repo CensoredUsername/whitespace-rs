@@ -1,6 +1,7 @@
 use num_bigint::Sign;
 
 use std::i64;
+use std::rc::Rc;
 
 use label::Label;
 use program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
@@ -272,6 +273,7 @@ impl Program {
 
         use program::Command::*;
         for (index, command) in self.commands.iter().enumerate() {
+            let label = self.locs.as_ref().and_then(|l| l[index].label.as_ref());
             let (code, arg): (&[u8], _) = match *command {
                 Push {value}           => (b"  ", Some(number_to_ws(value))),
                 PushBig {ref value}    => (b"  ", Some(large_number_to_ws(value))),
@@ -287,11 +289,11 @@ impl Program {
                 Modulo                 => (b"\t \t\t", None),
                 Set                    => (b"\t\t ", None),
                 Get                    => (b"\t\t\t", None),
-                Label                  => (b"\n  ", Some(label_to_ws(index))),
-                Call {index}           => (b"\n \t", Some(label_to_ws(index - 1))),
-                Jump {index}           => (b"\n \n", Some(label_to_ws(index - 1))),
-                JumpIfZero {index}     => (b"\n\t ", Some(label_to_ws(index - 1))),
-                JumpIfNegative {index} => (b"\n\t\t", Some(label_to_ws(index - 1))),
+                Label                  => (b"\n  ", Some(label_to_ws(label, index))),
+                Call {index}           => (b"\n \t", Some(label_to_ws(label, index - 1))),
+                Jump {index}           => (b"\n \n", Some(label_to_ws(label, index - 1))),
+                JumpIfZero {index}     => (b"\n\t ", Some(label_to_ws(label, index - 1))),
+                JumpIfNegative {index} => (b"\n\t\t", Some(label_to_ws(label, index - 1))),
                 EndSubroutine          => (b"\n\t\n", None),
                 EndProgram             => (b"\n\n\n", None),
                 PrintChar              => (b"\t\n  ", None),
@@ -364,8 +366,14 @@ fn large_number_to_ws(n: &BigInteger) -> Vec<u8> {
     return res;
 }
 
-fn label_to_ws(i: usize) -> Vec<u8> {
-    let label: Label = i.to_string().as_bytes().into();
+fn label_to_ws(label: Option<&Rc<Label>>, i: usize) -> Vec<u8> {
+    let label_storage: Label;
+    let label = if let Some(l) = label {
+        l
+    } else {
+        label_storage =  i.to_string().as_bytes().into();
+        &label_storage
+    };
     let mut res: Vec<u8> = (&label).into_iter()
                                    .map(|i| if i {b'\t'} else {b' '})
                                    .collect();
