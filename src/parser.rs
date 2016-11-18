@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use label::Label;
 use program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
-use ::WsParseError;
+use ::WsError;
+use ::WsErrorKind::ParseError;
 
 #[derive(Debug, Clone)]
 struct ParseState<'a> {
@@ -46,7 +47,7 @@ impl<'a> ParseState<'a> {
         ParseState {line: 1, column: 1, index: 0, item: None, buffer: buffer}
     }
 
-    fn parse_arg(&mut self) -> Result<SizedInteger, WsParseError> {
+    fn parse_arg(&mut self) -> Result<SizedInteger, WsError> {
         let mut accum = 0u64;
         let negative;
 
@@ -55,7 +56,7 @@ impl<'a> ParseState<'a> {
             Some(b'\n') => return Ok(SizedInteger::Small(0)),
             Some(b'\t') => true,
             Some(b' ' ) => false,
-            None        => return Err(WsParseError::new("Hit EOF while expecting argument", self.index, self.line, self.column)),
+            None        => return Err(WsError::new(ParseError(self.line, self.column, self.index), "Hit EOF while expecting argument")),
             _           => unreachable!()
         };
 
@@ -76,7 +77,7 @@ impl<'a> ParseState<'a> {
                         break;
                     }
                 }
-                None => return Err(WsParseError::new("Hit EOF while parsing argument", self.index, self.line, self.column))
+                None => return Err(WsError::new(ParseError(self.line, self.column, self.index), "Hit EOF while parsing argument"))
             }
         }
 
@@ -116,10 +117,10 @@ impl<'a> ParseState<'a> {
             }
             bit -= 1;
         }
-        Err(WsParseError::new("Hit EOF while parsing argument", self.index, self.line, self.column))
+        Err(WsError::new(ParseError(self.line, self.column, self.index), "Hit EOF while parsing argument"))
     }
 
-    fn parse_label(&mut self) -> Result<Label, WsParseError> {
+    fn parse_label(&mut self) -> Result<Label, WsError> {
         let mut label = Label::new();
 
         while let Some(byte) = self.next() {
@@ -130,14 +131,14 @@ impl<'a> ParseState<'a> {
                 _ => unreachable!()
             };
         }
-        Err(WsParseError::new("Hit EOF while parsing label", self.index, self.line, self.column))
+        Err(WsError::new(ParseError(self.line, self.column, self.index), "Hit EOF while parsing label"))
     }
 }
 
 impl Program {
     /// Parse a program written in whitespace to a format suitable
     /// for execution.
-    pub fn parse(code: Vec<u8>) -> Result<Program, WsParseError> {
+    pub fn parse(code: Vec<u8>) -> Result<Program, WsError> {
 
         let mut commands = Vec::<Command>::new();
         let mut sourcelocs = Vec::<SourceLoc>::new();
@@ -175,13 +176,13 @@ impl Program {
                     (3, 6)  => Command::Duplicate,
                     (3, 3)  => match try!(state.parse_arg()) {
                         SizedInteger::Small(value) => Command::Copy {index: value as usize},
-                        SizedInteger::Big(value) => return Err(WsParseError::new(format!("Copy argument too large: {}", value), startindex, startline, startcolumn))
+                        SizedInteger::Big(value) => return Err(WsError::new(ParseError(startline, startcolumn, startindex), format!("Copy argument too large: {}", value)))
                     },
                     (3, 7)  => Command::Swap,
                     (3, 8)  => Command::Discard,
                     (3, 5)  => match try!(state.parse_arg()) {
                         SizedInteger::Small(value) => Command::Slide {amount: value as usize},
-                        SizedInteger::Big(value) => return Err(WsParseError::new(format!("Slide argument too large: {}", value), startindex, startline, startcolumn))
+                        SizedInteger::Big(value) => return Err(WsError::new(ParseError(startline, startcolumn, startindex), format!("Slide argument too large: {}", value)))
                     },
 
                     (4, 27) => Command::Add,
@@ -227,7 +228,7 @@ impl Program {
                             'N'
                         }).collect::<String>();
 
-                        return Err(WsParseError::new(format!("invalid command: {}", s), startindex, startline, startcolumn));
+                        return Err(WsError::new(ParseError(startline, startcolumn, startindex), format!("invalid command: {}", s)));
                     },
                     (_, _) => continue
                 };
@@ -251,7 +252,7 @@ impl Program {
             }
 
             if hash_length != 0 {
-                return Err(WsParseError::new("Hit EOF while parsing command", state.index, state.line, state.column));
+                return Err(WsError::new(ParseError(state.line, state.column, state.index), "Hit EOF while parsing command"));
             }
         }
 

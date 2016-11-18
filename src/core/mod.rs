@@ -2,11 +2,15 @@ use dynasmrt::{self, DynasmApi, DynasmLabelApi, AssemblyOffset, DynamicLabel};
 use crossbeam;
 use num_bigint::Sign;
 use num_traits::{FromPrimitive, ToPrimitive};
+use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
+use memmap::{Mmap, Protection};
+use bincode::rustc_serialize::{encode_into, decode_from};
+use bincode::SizeLimit::Infinite;
 
 use std::{i32, i64, u8};
 use std::collections::HashMap;
 use std::cmp::{min, max};
-use std::io::{BufRead, Write};
+use std::io::{Read, BufRead, Write, Seek, SeekFrom, Cursor};
 use std::sync::mpsc;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -93,7 +97,7 @@ pub trait State<'a> {
         if let Some(val) = c.into_u8() {
             self.output().write_all(&[val]).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not write to the output file"))
         } else {
-            Err(WsError::new(WsErrorKind::ParseError, "The value is too large to be printed as a character"))
+            Err(WsError::new(WsErrorKind::RuntimeParseError, "The value is too large to be printed as a character"))
         }
     }
     fn write_num(&mut self, c: Self::Var) -> Result<(), WsError> {
@@ -110,7 +114,7 @@ pub trait State<'a> {
     fn input_num(&mut self) -> Result<(), WsError> {
         let s = try!(self.read_num());
         let s = s.trim();
-        let value = try!(s.parse::<Self::Var>().map_err(|_| WsError::new(WsErrorKind::ParseError, "Expected a number to parse")));
+        let value = try!(s.parse::<Self::Var>().map_err(|_| WsError::new(WsErrorKind::RuntimeParseError, "Expected a number to parse")));
         let key = self.stack().pop().unwrap();
         self.set(key, value);
         Ok(())
@@ -544,7 +548,6 @@ impl<'a> Interpreter<'a> {
     /// to interpretation in unsafe situations. When values become too large it will
     /// fall back to bignum-based interpretation.
     #[cfg(target_arch = "x86_64")]
-    #[cfg(target_arch = "x86_64")]
     pub fn jit_sync(&mut self) -> Result<(), WsError> {
         let program = &self.program;
         let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
@@ -620,7 +623,6 @@ impl<'a> Interpreter<'a> {
     /// to interpretation in unsafe situations. When values become too large it will
     /// fall back to bignum-based interpretation.
     #[cfg(target_arch = "x86_64")]
-    #[cfg(target_arch = "x86_64")]
     pub fn jit_threaded(&mut self) -> Result<(), WsError> {
         let program = &self.program;
         let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
@@ -690,6 +692,176 @@ impl<'a> Interpreter<'a> {
 
         // drop the channel so the compilation thread will terminate soon
         drop(jit_finished_receive);
+        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+    }
+
+    pub fn jit_serialize<F: Write + Seek>(&mut self, f: &mut F) -> Result<usize, WsError> {
+        let program = &self.program;
+        let mut compiler = JitCompiler::new(program, self.options);
+        let mut jit_handles = Vec::new();
+
+        // first compile everything 
+        use program::Command::*;
+        if let Some(start) = compiler.compile_index(0) {
+            jit_handles.push((0, start));
+        }
+        for (i, c) in program.commands.iter().enumerate() {
+            let i = match *c {
+                Label | Call {..} if i + 1 != program.commands.len() => i + 1,
+                _ => continue
+            };
+
+            if let Some(start) = compiler.compile_index(i) {
+                jit_handles.push((i, start));
+            }
+        }
+        compiler.commit();
+
+        // header will go here later
+        let header_pos = f.seek(SeekFrom::Current(0))?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(self.options.bits() as u64)?;
+
+        // serialize the compiled buffer
+        let executor = compiler.executor();
+        let buf = executor.lock();
+
+        let compiled_pos = f.seek(SeekFrom::Current(0))?;
+        let compiled_len = buf.len();
+        f.write_all(&*buf)?;
+
+        // serialize handles
+        let handles_pos = f.seek(SeekFrom::Current(0))?;
+        let handles_len = jit_handles.len();
+        for (index, offset) in jit_handles {
+            f.write_u64::<LittleEndian>(index as u64)?;
+            f.write_u64::<LittleEndian>(offset.0 as u64)?;
+        }
+
+        // serialize commands
+        let commands_pos = f.seek(SeekFrom::Current(0))?;
+        let commands_len = program.commands.len();
+        for command in &program.commands {
+            encode_into(command, f, Infinite)?;
+        }
+
+        let end_pos = f.seek(SeekFrom::Current(0))?;
+
+        // fixup header
+        f.seek(SeekFrom::Start(header_pos))?;
+        f.write_u64::<LittleEndian>(compiled_pos - header_pos)?;
+        f.write_u64::<LittleEndian>(compiled_len as u64)?;
+        f.write_u64::<LittleEndian>(commands_pos - header_pos)?;
+        f.write_u64::<LittleEndian>(commands_len as u64)?;
+        f.write_u64::<LittleEndian>(handles_pos - header_pos)?;
+        f.write_u64::<LittleEndian>(handles_len as u64)?;
+
+        f.seek(SeekFrom::Start(end_pos))?;
+        Ok((end_pos - header_pos) as usize)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn jit_run_from_serialized<F: Read + Seek>(f: &mut F, input: &mut BufRead, output: &mut Write) -> Result<(), WsError> {
+        // parse the header
+        let header_pos = f.seek(SeekFrom::Current(0))?;
+        let compiled_pos = f.read_u64::<LittleEndian>()? + header_pos;
+        let compiled_len = f.read_u64::<LittleEndian>()? as usize;
+        let command_pos = f.read_u64::<LittleEndian>()? + header_pos;
+        let command_len = f.read_u64::<LittleEndian>()? as usize;
+        let handles_pos = f.read_u64::<LittleEndian>()? + header_pos;
+        let handles_len = f.read_u64::<LittleEndian>()? as usize;
+        let options     = f.read_u64::<LittleEndian>()?;
+
+        // deserialize options
+
+        let options = Options::from_bits_truncate(options as u8);
+
+        // deserialize commands
+
+        f.seek(SeekFrom::Start(command_pos))?;
+        let commands = (0..command_len).map(|_| decode_from(f, Infinite)).collect::<Result<Vec<_>, _>>()?;
+
+        let program = Program {
+            source: None,
+            locs: None,
+            source_is_whitespace: false,
+            commands: commands
+        };
+
+        // deserialize handles
+
+        f.seek(SeekFrom::Start(handles_pos))?;
+        let mut jit_handles = vec![None; command_len];
+
+        for _ in 0..handles_len {
+            let index = f.read_u64::<LittleEndian>()? as usize;
+            let offset = f.read_u64::<LittleEndian>()? as usize;
+            if index >= command_len {
+                return Err(WsError::new(WsErrorKind::ParseError(0, 0, 0), "Invalid jit table index"));
+            }
+            jit_handles[index] = Some(offset);
+        }
+        let jit_handles = jit_handles;
+
+        // load compiled code into an executable buffer
+
+        let mut executable_buffer = Mmap::anonymous(compiled_len, Protection::ReadWrite).unwrap();
+        f.seek(SeekFrom::Start(compiled_pos))?;
+        f.read_exact(unsafe { executable_buffer.as_mut_slice() })?;
+
+        // patch the imports table
+        {
+            let mut c = Cursor::new(unsafe { executable_buffer.as_mut_slice() });
+            c.write_i64::<LittleEndian>(JitState::cache_bypass_get as i64)?;
+            c.write_i64::<LittleEndian>(JitState::cache_evict as i64)?;
+            c.write_i64::<LittleEndian>(JitState::print_num as i64)?;
+            c.write_i64::<LittleEndian>(JitState::print_char as i64)?;
+            c.write_i64::<LittleEndian>(JitState::input_char as i64)?;
+            c.write_i64::<LittleEndian>(JitState::call as i64)?;
+            c.write_i64::<LittleEndian>(JitState::ret as i64)?;
+            c.write_i64::<LittleEndian>(JitState::get_stack as i64)?;
+        }
+
+        executable_buffer.set_protection(Protection::ReadExecute).unwrap();
+        let executable_buffer = executable_buffer;
+
+        // then run it
+        let mut state = JitState::new(options, input, output);
+
+        while let Some(&offset) = jit_handles.get(*state.index()) {
+            // can we jit?
+            if let Some(offset) = offset {
+                let old_index = *state.index();
+
+                unsafe {
+                    state.run_block(executable_buffer.ptr().offset(offset as isize));
+                }
+                // if we exit on the same instruction as we started we need to try interpreting first 
+                // as otherwise we could get stuck in a loop due to stack errors
+                if old_index != *state.index() {
+                    continue;
+                }
+            }
+
+            // fallback interpreting.
+            match state.interpret_block(&program.commands) {
+                Ok(true) => (),
+                Ok(false) => return Ok(()),
+                Err(mut e) => if options.contains(NO_FALLBACK) {
+                    e.set_location(*state.index());
+                    return Err(e)
+                } else { 
+                    e.set_location(*state.index());
+                    return Self::bigint_fallback(&mut state, &program, e)
+                }
+            }
+        }
+
         Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
     }
 }
@@ -764,9 +936,9 @@ macro_rules! epilogue {
 }
 
 macro_rules! call_extern {
-    ($ops:expr, $addr:expr, $offset:expr) => {dynasm!($ops
+    ($ops:expr, $addr:ident, $offset:expr) => {dynasm!($ops
         ; lea stack, stack => Integer[$offset]
-        ; mov temp0, QWORD $addr as _
+        ; mov temp0, [->$addr]
         ; call temp0
         ; mov state, [rsp + 0x30]
         ; mov stack, [rsp + 0x38]
@@ -795,14 +967,36 @@ struct JitBlock {
 
 impl<'a> JitCompiler<'a> {
     fn new(program: &'a Program, options: Options) -> JitCompiler<'a> {
-        JitCompiler {
+        let mut comp = JitCompiler {
             options: options,
             commands: &program.commands,
             blocks: HashMap::new(),
             fixups: HashMap::new(),
             fixup_queue: Vec::new(),
             ops: dynasmrt::Assembler::new()
-        }
+        };
+
+        // create the import section
+        dynasm!(comp.ops
+            ;->cache_bypass_get:
+            ; .qword JitState::cache_bypass_get as _
+            ;->cache_evict:
+            ; .qword JitState::cache_evict as _
+            ;->print_num:
+            ; .qword JitState::print_num as _
+            ;->print_char:
+            ; .qword JitState::print_char as _
+            ;->input_char:
+            ; .qword JitState::input_char as _
+            ;->call:
+            ; .qword JitState::call as _
+            ;->ret:
+            ; .qword JitState::ret as _
+            ;->get_stack:
+            ; .qword JitState::get_stack as _
+        );
+
+        comp
     }
 
     /// Compiles an extended basic block starting at command_index
@@ -835,7 +1029,7 @@ impl<'a> JitCompiler<'a> {
             ; mov rdx, 0
             ; mov r8, 0
             ; lea r9, [rsp + 0x40] // this is where stack_start will be stored
-            ; mov temp0, QWORD JitState::get_stack as _
+            ; mov temp0, [->get_stack]
             ; call temp0
             ; test retval, retval
             ; jnz >badstack
@@ -1135,9 +1329,6 @@ impl<'a> JitCompiler<'a> {
                         (-1, 1)
                     },
                     Set => {
-                        // allocator.spill_forget(&mut self.ops);
-                        // call_extern!(self.ops, JitState::set, offset);
-
                         let mut key = 0;
                         let mut temp1 = 0;
                         // key is not flushed as we pass it by registers. value is flushed as we need to access it in cache_evict possibly
@@ -1164,7 +1355,7 @@ impl<'a> JitCompiler<'a> {
                             ; mov r9, Rq(key)
                             ; mov r8, temp0
                             // pushes the old entry into the hashmap, and puts the new entry (key from register, value from stack) into storage
-                            ;;call_extern!(self.ops, JitState::cache_evict, offset)
+                            ;;call_extern!(self.ops, cache_evict, offset)
                             ; jmp >end
                             // entry.key = key | 1
                             ;zero:
@@ -1178,15 +1369,6 @@ impl<'a> JitCompiler<'a> {
                         (-2, 0)
                     },
                     Get => {
-                        // allocator.spill_forget(&mut self.ops);
-                        // call_extern!(self.ops, JitState::get, offset);
-                        // dynasm!(self.ops
-                        //     ; test al, al
-                        //     ; jz >key_not_found
-                        //     ;; epilogue!(self.ops, stack_effect, command_index)
-                        //     ;key_not_found:
-                        // );
-
                         let mut key = 0;
                         // spill everything while loading the key and getting a temp reg
                         allocator.stage(&mut self.ops).load(&mut key, offset).finish();
@@ -1203,7 +1385,7 @@ impl<'a> JitCompiler<'a> {
                             ; cmp temp0 => CacheEntry.key, Rq(key)
                             ; je >equal
                             // not in cache
-                            ;;call_extern!(self.ops, JitState::cache_bypass_get, offset)
+                            ;;call_extern!(self.ops, cache_bypass_get, offset)
                         );
                         if !self.options.contains(UNCHECKED_HEAP) {
                             dynasm!(self.ops
@@ -1259,7 +1441,7 @@ impl<'a> JitCompiler<'a> {
                         }
                         dynasm!(self.ops
                             ; mov r8, command_index as i32 + 1
-                            ;; call_extern!(self.ops, JitState::call, offset)
+                            ;; call_extern!(self.ops, call, offset)
                             ; add QWORD state => JitState.stack_change, DWORD stack_effect
                         );
                         if let Some(block) = self.blocks.get(&index) {
@@ -1343,7 +1525,7 @@ impl<'a> JitCompiler<'a> {
                             ; add QWORD state => JitState.stack_change, DWORD stack_effect
                             ; mov r8, command_index as i32
                             ; lea r9, [rsp + 0x48]
-                            ;; call_extern!(self.ops, JitState::ret, offset)
+                            ;; call_extern!(self.ops, ret, offset)
                             ; test retval, retval
                             ; jz >interpret
                             ; jmp retval
@@ -1361,7 +1543,7 @@ impl<'a> JitCompiler<'a> {
                     PrintChar => {
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::print_char, offset)
+                            ;; call_extern!(self.ops, print_char, offset)
                             ; test al, al
                             ; jz >io_fail
                             ;; epilogue!(self.ops, stack_effect, command_index)
@@ -1372,7 +1554,7 @@ impl<'a> JitCompiler<'a> {
                     PrintNum => {
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::print_num, offset)
+                            ;; call_extern!(self.ops, print_num, offset)
                             ; test al, al
                             ; jz >io_fail
                             ;; epilogue!(self.ops, stack_effect, command_index)
@@ -1383,7 +1565,7 @@ impl<'a> JitCompiler<'a> {
                     InputChar => {
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::input_char, offset)
+                            ;; call_extern!(self.ops, input_char, offset)
                             ; test al, al
                             ; jz >io_fail
                             ;; epilogue!(self.ops, stack_effect, command_index)
@@ -1395,16 +1577,6 @@ impl<'a> JitCompiler<'a> {
                         allocator.spill_forget(&mut self.ops);
                         epilogue!(self.ops, stack_effect, command_index);
                         break;
-
-                        // allocator.spill_forget(&mut self.ops);
-                        // dynasm!(self.ops
-                        //     ;; call_extern!(self.ops, JitState::input_num, offset)
-                        //     ; test al, al
-                        //     ; jz >io_fail
-                        //     ;; epilogue!(self.ops, stack_effect, command_index)
-                        //     ;io_fail:
-                        // );
-                        // (-1, 0)
                     }
                 };
 

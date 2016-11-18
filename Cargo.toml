@@ -24,6 +24,10 @@ path = "src/lib.rs"
 name = "wsc"
 path = "src/main.rs"
 
+[[bin]]
+name = "runtime"
+path = "src/minimal_runtime.rs"
+
 
 [dependencies]
 itertools  = "0.*.*"
@@ -34,6 +38,10 @@ num-bigint = "0.*.*"
 num-traits = "0.*.*"
 dynasm     = "0.*.*"
 dynasmrt   = "0.*.*"
+byteorder  = "0.5.*"
+memmap     = "0.5.*"
+bincode    = "0.6.*"
+rustc-serialize = "0.3.*"
 
 [profile.release]
 debug = true

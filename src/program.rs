@@ -15,7 +15,7 @@ pub struct SourceLoc {
     pub label: Option<Rc<Label>>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub enum Command {
     Push {value: Integer},
     PushBig {value: BigInteger},
