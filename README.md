@@ -37,7 +37,7 @@ Documentation is available [here](https://censoredusername.github.io/whitespace-
 
 ## Build instructions
 
-Just run `cargo run --release` to run the interpreter. The library can also be downloaded directly from [crates.io](https://crates.io/crates/whitespacers).
+Just run `cargo run --bin wsc --release` to run the interpreter. The library can also be downloaded directly from [crates.io](https://crates.io/crates/whitespacers).
 
 ## License
 

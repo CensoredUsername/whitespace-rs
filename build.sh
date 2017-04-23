@@ -2,7 +2,7 @@ set -ex
 
 if [ "$1" = "--release" ]; then
     arg="--release ${@:2}"
-    path="debug"
+    path="release"
 else
     arg="${@:1}"
     path="debug"

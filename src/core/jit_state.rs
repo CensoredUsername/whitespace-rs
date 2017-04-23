@@ -6,7 +6,7 @@ use super::cached_map::{CachedMap, CacheEntry, Iter};
 use super::{State, SmallIntState};
 use super::bigint_state::BigIntState;
 use ::program::{Integer, BigInteger};
-use ::{Options, UNCHECKED_HEAP};
+use ::{Options, UNCHECKED_HEAP, IGNORE_OVERFLOW};
 use ::{WsError, WsErrorKind};
 
 pub struct JitState<'a> {
@@ -89,12 +89,16 @@ impl<'a, 'b> State<'a> for JitState<'b> {
                 self.set(key, value);
                 Ok(())
             },
-            Err(_) => match s.parse::<BigInteger>() {
-                Ok(i) => {
-                    *self.index() += 1;
-                    Err(WsError::new(WsErrorKind::InumOverflow(self.stack().pop().unwrap(), i), "Overflow while parsing number"))
-                },
-                Err(e) => Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Expected a number to parse2"))
+            Err(e) => if self.options.contains(IGNORE_OVERFLOW) {
+                Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Parsed number is outside arithmetic range"))
+            } else {
+                match s.parse::<BigInteger>() {
+                    Ok(i) => {
+                        *self.index() += 1;
+                        Err(WsError::new(WsErrorKind::InumOverflow(self.stack().pop().unwrap(), i), "Overflow while parsing number"))
+                    },
+                    Err(e) => Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Expected a number to parse"))
+                }
             }
         }
     }
@@ -180,6 +184,19 @@ impl<'a> JitState<'a> {
 
     pub unsafe extern "win64" fn input_char(state: *mut JitState, stack: *mut Integer) -> u8 {
         if let Ok(c) = (*state).read_char() {
+            (*state).set(*stack, c);
+            0
+        } else {
+            1
+        }
+    }
+
+    pub unsafe extern "win64" fn input_num(state: *mut JitState, stack: *mut Integer) -> u8 {
+        let s = if let Ok(s) = (*state).read_num() { s } else {
+            return 1;
+        };
+
+        if let Ok(c) = s.trim().parse::<Integer>() {
             (*state).set(*stack, c);
             0
         } else {

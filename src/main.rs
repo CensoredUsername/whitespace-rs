@@ -110,7 +110,7 @@ fn console_main() -> Result<(), Box<Error>> {
             let mut input = empty();
             let mut output = sink();
             let mut interpreter = Interpreter::new(&program, args.options, &mut input, &mut output);
-            interpreter.jit_serialize(&mut f)?;
+            interpreter.jit_serialize_bare(&mut f)?;
 
             // and write a footer so it can find the program data
             f.write_u64::<LittleEndian>(data_pos)?;

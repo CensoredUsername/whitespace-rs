@@ -4,7 +4,7 @@ use std::io::{BufRead, Write};
 
 use super::{State, SmallIntState};
 use ::program::{Integer, BigInteger};
-use ::Options;
+use ::{Options, IGNORE_OVERFLOW};
 use super::bigint_state::BigIntState;
 use ::{WsError, WsErrorKind};
 
@@ -77,12 +77,16 @@ impl<'a, 'b> State<'a> for SimpleState<'b> {
                 self.set(key, value);
                 Ok(())
             },
-            Err(_) => match s.parse::<BigInteger>() {
-                Ok(i) => {
-                    *self.index() += 1;
-                    Err(WsError::new(WsErrorKind::InumOverflow(self.stack().pop().unwrap(), i), "Overflow while parsing number"))
-                },
-                Err(e) => Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Expected a number to parse2"))
+            Err(e) => if self.options.contains(IGNORE_OVERFLOW) {
+                Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Parsed number is outside arithmetic range"))
+            } else {
+                match s.parse::<BigInteger>() {
+                    Ok(i) => {
+                        *self.index() += 1;
+                        Err(WsError::new(WsErrorKind::InumOverflow(self.stack().pop().unwrap(), i), "Overflow while parsing number"))
+                    },
+                    Err(e) => Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Expected a number to parse"))
+                }
             }
         }
     }

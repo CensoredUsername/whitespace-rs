@@ -26,7 +26,7 @@ fn console_main() -> Result<(), Box<Error>> {
     exe.seek(SeekFrom::Start(serialized_offset))?;
 
     let stdin = stdin();
-    whitespacers::Interpreter::jit_run_from_serialized(&mut exe, &mut stdin.lock(), &mut stdout())?;
+    whitespacers::Interpreter::jit_run_from_serialized_bare(&mut exe, &mut stdin.lock(), &mut stdout())?;
 
     Ok(())
 }

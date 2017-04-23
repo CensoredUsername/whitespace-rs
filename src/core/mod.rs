@@ -1,4 +1,5 @@
 use dynasmrt::{self, DynasmApi, DynasmLabelApi, AssemblyOffset, DynamicLabel};
+use dynasmrt::x64::Assembler;
 use crossbeam;
 use num_bigint::Sign;
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -768,14 +769,14 @@ impl<'a> Interpreter<'a> {
     #[cfg(target_arch = "x86_64")]
     pub fn jit_run_from_serialized<F: Read + Seek>(f: &mut F, input: &mut BufRead, output: &mut Write) -> Result<(), WsError> {
         // parse the header
-        let header_pos = f.seek(SeekFrom::Current(0))?;
+        let header_pos   = f.seek(SeekFrom::Current(0))?;
         let compiled_pos = f.read_u64::<LittleEndian>()? + header_pos;
         let compiled_len = f.read_u64::<LittleEndian>()? as usize;
-        let command_pos = f.read_u64::<LittleEndian>()? + header_pos;
-        let command_len = f.read_u64::<LittleEndian>()? as usize;
-        let handles_pos = f.read_u64::<LittleEndian>()? + header_pos;
-        let handles_len = f.read_u64::<LittleEndian>()? as usize;
-        let options     = f.read_u64::<LittleEndian>()?;
+        let command_pos  = f.read_u64::<LittleEndian>()? + header_pos;
+        let command_len  = f.read_u64::<LittleEndian>()? as usize;
+        let handles_pos  = f.read_u64::<LittleEndian>()? + header_pos;
+        let handles_len  = f.read_u64::<LittleEndian>()? as usize;
+        let options      = f.read_u64::<LittleEndian>()?;
 
         // deserialize options
 
@@ -822,6 +823,7 @@ impl<'a> Interpreter<'a> {
             c.write_i64::<LittleEndian>(JitState::print_num as i64)?;
             c.write_i64::<LittleEndian>(JitState::print_char as i64)?;
             c.write_i64::<LittleEndian>(JitState::input_char as i64)?;
+            c.write_i64::<LittleEndian>(JitState::input_num as i64)?;
             c.write_i64::<LittleEndian>(JitState::call as i64)?;
             c.write_i64::<LittleEndian>(JitState::ret as i64)?;
             c.write_i64::<LittleEndian>(JitState::get_stack as i64)?;
@@ -863,6 +865,98 @@ impl<'a> Interpreter<'a> {
         }
 
         Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+    }
+
+    pub fn jit_serialize_bare<F: Write + Seek>(&mut self, f: &mut F) -> Result<usize, WsError> {
+        let options = self.options | IGNORE_OVERFLOW | NO_FALLBACK;
+
+        let program = &self.program;
+        let mut compiler = JitCompiler::new(program, options);
+        let mut jit_handles = Vec::new();
+
+        // first compile everything 
+        use program::Command::*;
+        if let Some(start) = compiler.compile_index(0) {
+            jit_handles.push((0, start));
+        }
+        for (i, c) in program.commands.iter().enumerate() {
+            let i = match *c {
+                Label | Call {..} if i + 1 != program.commands.len() => i + 1,
+                _ => continue
+            };
+
+            if let Some(start) = compiler.compile_index(i) {
+                jit_handles.push((i, start));
+            }
+        }
+        compiler.commit();
+
+        // header will go here later
+        let header_pos = f.seek(SeekFrom::Current(0))?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(0)?;
+        f.write_u64::<LittleEndian>(options.bits() as u64)?;
+
+        // serialize the compiled buffer
+        let executor = compiler.executor();
+        let buf = executor.lock();
+
+        let compiled_pos = f.seek(SeekFrom::Current(0))?;
+        let compiled_len = buf.len();
+        f.write_all(&*buf)?;
+
+        let end_pos = f.seek(SeekFrom::Current(0))?;
+
+        // fixup header
+        f.seek(SeekFrom::Start(header_pos))?;
+        f.write_u64::<LittleEndian>(compiled_pos - header_pos)?;
+        f.write_u64::<LittleEndian>(compiled_len as u64)?;
+
+        f.seek(SeekFrom::Start(end_pos))?;
+        Ok((end_pos - header_pos) as usize)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn jit_run_from_serialized_bare<F: Read + Seek>(f: &mut F, input: &mut BufRead, output: &mut Write) -> Result<(), WsError> {
+        // parse the header
+        let header_pos = f.seek(SeekFrom::Current(0))?;
+        let compiled_pos = f.read_u64::<LittleEndian>()? + header_pos;
+        let compiled_len = f.read_u64::<LittleEndian>()? as usize;
+        let options      = f.read_u64::<LittleEndian>()?;
+
+        // deserialize options
+
+        let options = Options::from_bits_truncate(options as u8);
+
+        // load compiled code into an executable buffer
+
+        let mut executable_buffer = Mmap::anonymous(compiled_len, Protection::ReadWrite).unwrap();
+        f.seek(SeekFrom::Start(compiled_pos))?;
+        f.read_exact(unsafe { executable_buffer.as_mut_slice() })?;
+
+        // patch the imports table
+        {
+            let mut c = Cursor::new(unsafe { executable_buffer.as_mut_slice() });
+            c.write_i64::<LittleEndian>(JitState::cache_bypass_get as i64)?;
+            c.write_i64::<LittleEndian>(JitState::cache_evict as i64)?;
+            c.write_i64::<LittleEndian>(JitState::print_num as i64)?;
+            c.write_i64::<LittleEndian>(JitState::print_char as i64)?;
+            c.write_i64::<LittleEndian>(JitState::input_char as i64)?;
+            c.write_i64::<LittleEndian>(JitState::input_num as i64)?;
+            c.write_i64::<LittleEndian>(JitState::call as i64)?;
+            c.write_i64::<LittleEndian>(JitState::ret as i64)?;
+            c.write_i64::<LittleEndian>(JitState::get_stack as i64)?;
+        }
+
+        executable_buffer.set_protection(Protection::ReadExecute).unwrap();
+        let executable_buffer = executable_buffer;
+
+        // then run it
+        let mut state = JitState::new(options, input, output);
+
+        unsafe { state.run_block(executable_buffer.ptr().offset(8*9)) };
+
+        Ok(())
     }
 }
 
@@ -938,8 +1032,7 @@ macro_rules! epilogue {
 macro_rules! call_extern {
     ($ops:expr, $addr:ident, $offset:expr) => {dynasm!($ops
         ; lea stack, stack => Integer[$offset]
-        ; mov temp0, [->$addr]
-        ; call temp0
+        ; call QWORD [->$addr]
         ; mov state, [rsp + 0x30]
         ; mov stack, [rsp + 0x38]
     )}
@@ -951,7 +1044,7 @@ struct JitCompiler<'a> {
     blocks: HashMap<usize, JitBlock>,
     fixups: HashMap<usize, Vec<FixUp>>,
     fixup_queue: Vec<(usize, DynamicLabel)>,
-    ops: dynasmrt::Assembler
+    ops: Assembler
 }
 
 enum FixUp {
@@ -973,7 +1066,7 @@ impl<'a> JitCompiler<'a> {
             blocks: HashMap::new(),
             fixups: HashMap::new(),
             fixup_queue: Vec::new(),
-            ops: dynasmrt::Assembler::new()
+            ops: Assembler::new()
         };
 
         // create the import section
@@ -988,6 +1081,8 @@ impl<'a> JitCompiler<'a> {
             ; .qword JitState::print_char as _
             ;->input_char:
             ; .qword JitState::input_char as _
+            ;->input_num:
+            ; .qword JitState::input_num as _
             ;->call:
             ; .qword JitState::call as _
             ;->ret:
@@ -1026,8 +1121,8 @@ impl<'a> JitCompiler<'a> {
             ;; stack_fixes = self.ops.offset()
 
             // prep args for get stack (rcx is already set to state). min_stack and max_stack are later fixed up
-            ; mov rdx, 0
-            ; mov r8, 0
+            ; mov rdx, DWORD 0
+            ; mov r8, DWORD 0
             ; lea r9, [rsp + 0x40] // this is where stack_start will be stored
             ; mov temp0, [->get_stack]
             ; call temp0
@@ -1435,7 +1530,7 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             dynasm!(self.ops
-                                ; mov r9, 0
+                                ; mov r9, DWORD 0
                             );
                             Self::add_fixup(&mut self.fixups, command_index + 1, FixUp::Lea(start, self.ops.offset()));
                         }
@@ -1575,8 +1670,19 @@ impl<'a> JitCompiler<'a> {
                     },
                     InputNum => {
                         allocator.spill_forget(&mut self.ops);
-                        epilogue!(self.ops, stack_effect, command_index);
-                        break;
+                        if self.options.contains(IGNORE_OVERFLOW) {
+                            dynasm!(self.ops
+                                ;; call_extern!(self.ops, input_num, offset)
+                                ; test al, al
+                                ; jz >io_fail
+                                ;; epilogue!(self.ops, stack_effect, command_index)
+                                ;io_fail:
+                            );
+                            (-1, 0)
+                        } else {
+                            epilogue!(self.ops, stack_effect, command_index);
+                            break;
+                        }
                     }
                 };
 
