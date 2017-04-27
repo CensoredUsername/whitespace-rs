@@ -101,9 +101,9 @@ impl<'a> State<'a> for BigIntState<'a> {
     }
 
     fn input_num(&mut self) -> Result<(), WsError> {
-        let s = try!(self.read_num());
+        let s = self.read_num()?;
         let s = s.trim();
-        let value = try!(s.parse::<BigInteger>().map_err(|e| WsError::wrap(e, WsErrorKind::ParseError, "Expected a number to parse")));
+        let value = s.parse::<BigInteger>().map_err(|e| WsError::wrap(e, WsErrorKind::RuntimeParseError, "Expected a number to parse"))?;
         let key = self.stack().pop().unwrap();
         self.set(key, value);
         Ok(())

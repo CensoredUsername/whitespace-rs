@@ -1,4 +1,5 @@
-use dynasmrt::{self, DynasmApi};
+use dynasmrt::x64::Assembler;
+use dynasmrt::DynasmApi;
 use ::program::Integer;
 
 const DYNAMIC_REGS: usize = 4;
@@ -43,7 +44,7 @@ impl RegAllocator {
         }
     }
 
-    pub fn spill_keep(&mut self, ops: &mut dynasmrt::Assembler) {
+    pub fn spill_keep(&mut self, ops: &mut Assembler) {
         for alloc in self.allocations.iter_mut().filter_map(|x| x.as_mut()) {
             if alloc.mutated {
                 dynasm!(ops
@@ -54,7 +55,7 @@ impl RegAllocator {
         }
     }
 
-    pub fn spill_error(&mut self, ops: &mut dynasmrt::Assembler) {
+    pub fn spill_error(&mut self, ops: &mut Assembler) {
         for alloc in self.allocations.iter().filter_map(|x| x.as_ref()) {
             if alloc.mutated {
                 dynasm!(ops
@@ -64,7 +65,7 @@ impl RegAllocator {
         }
     }
 
-    pub fn spill_forget(&mut self, ops: &mut dynasmrt::Assembler) {
+    pub fn spill_forget(&mut self, ops: &mut Assembler) {
         for alloc in self.allocations.iter_mut().filter_map(|x| x.take()) {
             if alloc.mutated {
                 dynasm!(ops
@@ -74,7 +75,7 @@ impl RegAllocator {
         }
     }
 
-    pub fn stage<'a>(&'a mut self, assembler: &'a mut dynasmrt::Assembler) -> AllocationBuilder<'a> {
+    pub fn stage<'a>(&'a mut self, assembler: &'a mut Assembler) -> AllocationBuilder<'a> {
         AllocationBuilder {
             allocator: self,
             assembler: assembler,
@@ -92,7 +93,7 @@ struct RegAllocation {
 
 pub struct AllocationBuilder<'a> {
     allocator: &'a mut RegAllocator,
-    assembler: &'a mut dynasmrt::Assembler,
+    assembler: &'a mut Assembler,
     queue: Vec<(&'a mut u8, bool, Option<i32>)>
 }
 

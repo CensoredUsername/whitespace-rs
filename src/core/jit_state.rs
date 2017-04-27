@@ -6,7 +6,7 @@ use super::cached_map::{CachedMap, CacheEntry, Iter};
 use super::{State, SmallIntState};
 use super::bigint_state::BigIntState;
 use ::program::{Integer, BigInteger};
-use ::{Options, UNCHECKED_HEAP};
+use ::{Options, UNCHECKED_HEAP, IGNORE_OVERFLOW};
 use ::{WsError, WsErrorKind};
 
 pub struct JitState<'a> {
@@ -81,7 +81,7 @@ impl<'a, 'b> State<'a> for JitState<'b> {
     }
 
     fn input_num(&mut self) -> Result<(), WsError> {
-        let s = try!(self.read_num());
+        let s = self.read_num()?;
         let s = s.trim();
         match s.parse::<Integer>() {
             Ok(value) => {
@@ -89,12 +89,14 @@ impl<'a, 'b> State<'a> for JitState<'b> {
                 self.set(key, value);
                 Ok(())
             },
-            Err(_) => match s.parse::<BigInteger>() {
-                Ok(i) => {
+            Err(e) => match s.parse::<BigInteger>() {
+                Ok(i) => if self.options.contains(IGNORE_OVERFLOW) {
+                    Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Parsed number is outside arithmetic range"))
+                } else {
                     *self.index() += 1;
                     Err(WsError::new(WsErrorKind::InumOverflow(self.stack().pop().unwrap(), i), "Overflow while parsing number"))
                 },
-                Err(e) => Err(WsError::wrap(e, WsErrorKind::ParseError, "Expected a number to parse2"))
+                Err(e) => Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Expected a number to parse"))
             }
         }
     }

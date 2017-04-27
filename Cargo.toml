@@ -36,5 +36,5 @@ dynasm     = "0.*.*"
 dynasmrt   = "0.*.*"
 
 [profile.release]
-debug = true
+debug = false
 lto = true

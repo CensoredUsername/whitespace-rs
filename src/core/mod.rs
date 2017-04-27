@@ -1,3 +1,4 @@
+use dynasmrt::x64::Assembler;
 use dynasmrt::{self, DynasmApi, DynasmLabelApi, AssemblyOffset, DynamicLabel};
 use crossbeam;
 use num_bigint::Sign;
@@ -79,21 +80,21 @@ pub trait State<'a> {
     /// perform input/output functions on the program state
     fn read_char(&mut self) -> Result<Self::Var, WsError> {
         let mut s = [0; 1];
-        try!(self.output().flush()          .map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not flush the output file")));
-        try!(self.input().read_exact(&mut s).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not read from the input file")));
+        self.output().flush()          .map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not flush the output file"))?;
+        self.input().read_exact(&mut s).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not read from the input file"))?;
         Ok(Self::Var::from_u8(s[0]))
     }
     fn read_num(&mut self) -> Result<String, WsError> {
         let mut s = String::new();
-        try!(self.output().flush()         .map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not flush the output file")));
-        try!(self.input().read_line(&mut s).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not read a line from the input file")));
+        self.output().flush()         .map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not flush the output file"))?;
+        self.input().read_line(&mut s).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not read a line from the input file"))?;
         Ok(s)
     }
     fn write_char(&mut self, c: Self::Var) -> Result<(), WsError> {
         if let Some(val) = c.into_u8() {
             self.output().write_all(&[val]).map_err(|e| WsError::wrap(e, WsErrorKind::IOError, "Could not write to the output file"))
         } else {
-            Err(WsError::new(WsErrorKind::ParseError, "The value is too large to be printed as a character"))
+            Err(WsError::new(WsErrorKind::RuntimeParseError, "The value is too large to be printed as a character"))
         }
     }
     fn write_num(&mut self, c: Self::Var) -> Result<(), WsError> {
@@ -108,9 +109,9 @@ pub trait State<'a> {
     }
 
     fn input_num(&mut self) -> Result<(), WsError> {
-        let s = try!(self.read_num());
+        let s = self.read_num()?;
         let s = s.trim();
-        let value = try!(s.parse::<Self::Var>().map_err(|_| WsError::new(WsErrorKind::ParseError, "Expected a number to parse")));
+        let value = s.parse::<Self::Var>().map_err(|_| WsError::new(WsErrorKind::RuntimeParseError, "Expected a number to parse"))?;
         let key = self.stack().pop().unwrap();
         self.set(key, value);
         Ok(())
@@ -130,7 +131,7 @@ pub trait State<'a> {
 
             match *c {
                 Push {ref value} => self.stack().push(value.clone().into()),
-                PushBig {ref value} => try!(self.push_large(value)),
+                PushBig {ref value} => self.push_large(value)?,
                 Duplicate => if let Some(value) = self.stack().last().cloned() {
                     self.stack().push(value);
                 } else {
@@ -273,24 +274,24 @@ pub trait State<'a> {
                 },
                 EndProgram => return Ok(false),
                 PrintChar => if let Some(c) = self.stack().pop() {
-                    try!(self.write_char(c));
+                    self.write_char(c)?;
                 } else {
                     return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to print"));
                 },
                 PrintNum => if let Some(c) = self.stack().pop() {
-                    try!(self.write_num(c));
+                    self.write_num(c)?;
                 } else {
                     return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to print"));
                 },
                 InputChar => if len > 0 {
-                    let c = try!(self.read_char());
+                    let c = self.read_char()?;
                     let key = self.stack().pop().unwrap();
                     self.set(key, c);
                 } else {
                     return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to input character"));
                 },
                 InputNum => if len > 0 {
-                    try!(self.input_num());
+                    self.input_num()?;
                 } else {
                     return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to input number"));
                 }
@@ -440,7 +441,7 @@ impl<'a> Interpreter<'a> {
     /// and returns the amount of executed instructions on success.
     pub fn count_with_simple_state(&'a mut self) -> Result<usize, WsError> {
         let mut state = SimpleState::new(self.options, &mut self.input, &mut self.output);
-        try!(Self::interpret(&mut state, &self.program));
+        Self::interpret(&mut state, &self.program)?;
         Ok(state.count)
     }
 
@@ -544,7 +545,6 @@ impl<'a> Interpreter<'a> {
     /// to interpretation in unsafe situations. When values become too large it will
     /// fall back to bignum-based interpretation.
     #[cfg(target_arch = "x86_64")]
-    #[cfg(target_arch = "x86_64")]
     pub fn jit_sync(&mut self) -> Result<(), WsError> {
         let program = &self.program;
         let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
@@ -619,7 +619,6 @@ impl<'a> Interpreter<'a> {
     /// the program. It is backed by an optimized datastructure, and will fall back
     /// to interpretation in unsafe situations. When values become too large it will
     /// fall back to bignum-based interpretation.
-    #[cfg(target_arch = "x86_64")]
     #[cfg(target_arch = "x86_64")]
     pub fn jit_threaded(&mut self) -> Result<(), WsError> {
         let program = &self.program;
@@ -764,10 +763,9 @@ macro_rules! epilogue {
 }
 
 macro_rules! call_extern {
-    ($ops:expr, $addr:expr, $offset:expr) => {dynasm!($ops
+    ($ops:expr, $addr:ident, $offset:expr) => {dynasm!($ops
         ; lea stack, stack => Integer[$offset]
-        ; mov temp0, QWORD $addr as _
-        ; call temp0
+        ; call QWORD [->$addr]
         ; mov state, [rsp + 0x30]
         ; mov stack, [rsp + 0x38]
     )}
@@ -779,7 +777,7 @@ struct JitCompiler<'a> {
     blocks: HashMap<usize, JitBlock>,
     fixups: HashMap<usize, Vec<FixUp>>,
     fixup_queue: Vec<(usize, DynamicLabel)>,
-    ops: dynasmrt::Assembler
+    ops: Assembler
 }
 
 enum FixUp {
@@ -795,14 +793,36 @@ struct JitBlock {
 
 impl<'a> JitCompiler<'a> {
     fn new(program: &'a Program, options: Options) -> JitCompiler<'a> {
-        JitCompiler {
+        let mut comp = JitCompiler {
             options: options,
             commands: &program.commands,
             blocks: HashMap::new(),
             fixups: HashMap::new(),
             fixup_queue: Vec::new(),
-            ops: dynasmrt::Assembler::new()
-        }
+            ops: Assembler::new()
+        };
+
+        // create the import section
+        dynasm!(comp.ops
+            ;->cache_bypass_get:
+            ; .qword JitState::cache_bypass_get as _
+            ;->cache_evict:
+            ; .qword JitState::cache_evict as _
+            ;->print_num:
+            ; .qword JitState::print_num as _
+            ;->print_char:
+            ; .qword JitState::print_char as _
+            ;->input_char:
+            ; .qword JitState::input_char as _
+            ;->call:
+            ; .qword JitState::call as _
+            ;->ret:
+            ; .qword JitState::ret as _
+            ;->get_stack:
+            ; .qword JitState::get_stack as _
+        );
+
+        comp
     }
 
     /// Compiles an extended basic block starting at command_index
@@ -832,11 +852,10 @@ impl<'a> JitCompiler<'a> {
             ;; stack_fixes = self.ops.offset()
 
             // prep args for get stack (rcx is already set to state). min_stack and max_stack are later fixed up
-            ; mov rdx, 0
-            ; mov r8, 0
+            ; mov rdx, DWORD 0
+            ; mov r8, DWORD 0
             ; lea r9, [rsp + 0x40] // this is where stack_start will be stored
-            ; mov temp0, QWORD JitState::get_stack as _
-            ; call temp0
+            ; call QWORD [->get_stack]
             ; test retval, retval
             ; jnz >badstack
         );
@@ -1135,9 +1154,6 @@ impl<'a> JitCompiler<'a> {
                         (-1, 1)
                     },
                     Set => {
-                        // allocator.spill_forget(&mut self.ops);
-                        // call_extern!(self.ops, JitState::set, offset);
-
                         let mut key = 0;
                         let mut temp1 = 0;
                         // key is not flushed as we pass it by registers. value is flushed as we need to access it in cache_evict possibly
@@ -1164,7 +1180,7 @@ impl<'a> JitCompiler<'a> {
                             ; mov r9, Rq(key)
                             ; mov r8, temp0
                             // pushes the old entry into the hashmap, and puts the new entry (key from register, value from stack) into storage
-                            ;;call_extern!(self.ops, JitState::cache_evict, offset)
+                            ;;call_extern!(self.ops, cache_evict, offset)
                             ; jmp >end
                             // entry.key = key | 1
                             ;zero:
@@ -1178,15 +1194,6 @@ impl<'a> JitCompiler<'a> {
                         (-2, 0)
                     },
                     Get => {
-                        // allocator.spill_forget(&mut self.ops);
-                        // call_extern!(self.ops, JitState::get, offset);
-                        // dynasm!(self.ops
-                        //     ; test al, al
-                        //     ; jz >key_not_found
-                        //     ;; epilogue!(self.ops, stack_effect, command_index)
-                        //     ;key_not_found:
-                        // );
-
                         let mut key = 0;
                         // spill everything while loading the key and getting a temp reg
                         allocator.stage(&mut self.ops).load(&mut key, offset).finish();
@@ -1203,7 +1210,7 @@ impl<'a> JitCompiler<'a> {
                             ; cmp temp0 => CacheEntry.key, Rq(key)
                             ; je >equal
                             // not in cache
-                            ;;call_extern!(self.ops, JitState::cache_bypass_get, offset)
+                            ;;call_extern!(self.ops, cache_bypass_get, offset)
                         );
                         if !self.options.contains(UNCHECKED_HEAP) {
                             dynasm!(self.ops
@@ -1253,13 +1260,13 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             dynasm!(self.ops
-                                ; mov r9, 0
+                                ; mov r9, DWORD 0
                             );
                             Self::add_fixup(&mut self.fixups, command_index + 1, FixUp::Lea(start, self.ops.offset()));
                         }
                         dynasm!(self.ops
                             ; mov r8, command_index as i32 + 1
-                            ;; call_extern!(self.ops, JitState::call, offset)
+                            ;; call_extern!(self.ops, call, offset)
                             ; add QWORD state => JitState.stack_change, DWORD stack_effect
                         );
                         if let Some(block) = self.blocks.get(&index) {
@@ -1343,7 +1350,7 @@ impl<'a> JitCompiler<'a> {
                             ; add QWORD state => JitState.stack_change, DWORD stack_effect
                             ; mov r8, command_index as i32
                             ; lea r9, [rsp + 0x48]
-                            ;; call_extern!(self.ops, JitState::ret, offset)
+                            ;; call_extern!(self.ops, ret, offset)
                             ; test retval, retval
                             ; jz >interpret
                             ; jmp retval
@@ -1361,7 +1368,7 @@ impl<'a> JitCompiler<'a> {
                     PrintChar => {
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::print_char, offset)
+                            ;; call_extern!(self.ops, print_char, offset)
                             ; test al, al
                             ; jz >io_fail
                             ;; epilogue!(self.ops, stack_effect, command_index)
@@ -1372,7 +1379,7 @@ impl<'a> JitCompiler<'a> {
                     PrintNum => {
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::print_num, offset)
+                            ;; call_extern!(self.ops, print_num, offset)
                             ; test al, al
                             ; jz >io_fail
                             ;; epilogue!(self.ops, stack_effect, command_index)
@@ -1383,7 +1390,7 @@ impl<'a> JitCompiler<'a> {
                     InputChar => {
                         allocator.spill_forget(&mut self.ops);
                         dynasm!(self.ops
-                            ;; call_extern!(self.ops, JitState::input_char, offset)
+                            ;; call_extern!(self.ops, input_char, offset)
                             ; test al, al
                             ; jz >io_fail
                             ;; epilogue!(self.ops, stack_effect, command_index)
@@ -1395,16 +1402,6 @@ impl<'a> JitCompiler<'a> {
                         allocator.spill_forget(&mut self.ops);
                         epilogue!(self.ops, stack_effect, command_index);
                         break;
-
-                        // allocator.spill_forget(&mut self.ops);
-                        // dynasm!(self.ops
-                        //     ;; call_extern!(self.ops, JitState::input_num, offset)
-                        //     ; test al, al
-                        //     ; jz >io_fail
-                        //     ;; epilogue!(self.ops, stack_effect, command_index)
-                        //     ;io_fail:
-                        // );
-                        // (-1, 0)
                     }
                 };
 

@@ -1,6 +1,7 @@
 extern crate whitespacers;
 
 use std::env;
+use std::error::Error;
 use std::io::{self, Write, Read, BufRead};
 use std::fs::File;
 use std::time::Instant;
@@ -45,39 +46,36 @@ enum Strategy {
 fn main() {
     match console_main() {
         Ok(()) => (),
-        Err(s) => write!(io::stderr(), "Error: {}\n", s).unwrap()
+        Err(s) => write!(io::stderr(), "Error: {}\n", s.to_string()).unwrap()
     }
 }
 
-fn console_main() -> Result<(), String> {
+fn console_main() -> Result<(), Box<Error>> {
     let time_start = Instant::now();
 
-    let args = try!(parse_args());
+    let args = parse_args()?;
 
     let time_args = Instant::now();
 
     let data = {
-        let mut file = try!(File::open(&args.program).map_err(|e| e.to_string()));
-
+        let mut file = File::open(&args.program)?;
         let mut data = String::new();
-
-        try!(file.read_to_string(&mut data).map_err(|e| e.to_string()));
-
+        file.read_to_string(&mut data)?;
         data
     };
 
     let time_input = Instant::now();
 
-    let program = try!(match args.format {
-        FileFormat::Whitespace => Program::parse(data.into_bytes()).map_err(|e| e.to_string()),
-        FileFormat::Assembly => Program::assemble(data).map_err(|e| e.to_string())
-    });
+    let program = match args.format {
+        FileFormat::Whitespace => Program::parse(data.into_bytes())?,
+        FileFormat::Assembly => Program::assemble(data)?
+    };
 
     let time_parse = Instant::now();
 
     let mut output: Box<Write> = if let Some(path) = args.output {
         Box::new(io::BufWriter::new(
-            try!(File::create(&path).map_err(|e| e.to_string()))
+            File::create(&path)?
         ))
     } else {
         Box::new(io::BufWriter::new(
@@ -89,17 +87,17 @@ fn console_main() -> Result<(), String> {
 
     match args.action {
         Action::Translate => {
-            try!(match args.format {
+            match args.format {
                 FileFormat::Whitespace => output.write_all(program.disassemble().as_bytes()),
                 FileFormat::Assembly   => output.write_all(program.dump().as_slice())
-            }.map_err(|e| e.to_string()));
+            }?;
 
             time_finish = Instant::now();
         },
         _ => {
             let mut input: Box<BufRead> = if let Some(path) = args.input {
                 Box::new(io::BufReader::new(
-                    try!(File::open(&path).map_err(|e| e.to_string()))
+                    File::open(&path)?
                 ))
             } else {
                 Box::new(io::BufReader::new(
@@ -109,7 +107,7 @@ fn console_main() -> Result<(), String> {
             match args.action {
                 Action::Execute(strategy) => {
                     let mut interpreter = Interpreter::new(&program, args.options, &mut input, &mut output);
-                    try!(match strategy {
+                    match strategy {
                         Strategy::SimpleState => interpreter.interpret_with_simple_state(),
                         Strategy::BigState => interpreter.interpret_with_bigint_state(),
                         Strategy::FastState => interpreter.interpret_with_fast_state(),
@@ -117,14 +115,14 @@ fn console_main() -> Result<(), String> {
                         Strategy::Sync => interpreter.jit_sync(),
                         Strategy::Async => interpreter.jit_threaded(),
                         Strategy::Count => interpreter.count_with_simple_state().map(|count| println!("Executed {} instructions", count))
-                    }.map_err(|e| {e.format_with_program(&program)}));
+                    }.map_err(|e| {e.format_with_program(&program)})?;
                     time_finish = Instant::now();
                 },
                 Action::Dump(ref filename) => {
                     let buffer = debug_compile(&program, args.options);
                     time_finish = Instant::now();
-                    let mut f = try!(File::create(filename).map_err(|e| e.to_string()));
-                    try!(f.write_all(&buffer).map_err(|e| e.to_string()));
+                    let mut f = File::create(filename)?;
+                    f.write_all(&buffer)?;
                 },
                 _ => unreachable!()
             };

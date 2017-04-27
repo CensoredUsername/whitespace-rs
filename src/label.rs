@@ -78,9 +78,9 @@ impl fmt::Display for Label {
             }
         }
 
-        try!(f.write_char('_'));
+        f.write_char('_')?;
         for bit in self.into_iter() {
-            try!(f.write_char(if bit {'1'} else {'0'}));
+            f.write_char(if bit {'1'} else {'0'})?;
         }
         Ok(())
     }
