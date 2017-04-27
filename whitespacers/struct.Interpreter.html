@@ -9,6 +9,7 @@
 
     <title>whitespacers::Interpreter - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
     <link rel="stylesheet" type="text/css" href="../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../main.css">
     
@@ -16,7 +17,7 @@
     
     
 </head>
-<body class="rustdoc">
+<body class="rustdoc struct">
     <!--[if lte IE 8]>
     <div class="warning">
         This old browser is unsupported and will most likely display funky
@@ -28,7 +29,7 @@
 
     <nav class="sidebar">
         
-        <p class='location'><a href='index.html'>whitespacers</a></p><script>window.sidebarCurrent = {name: 'Interpreter', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+        <p class='location'>Struct Interpreter</p><div class="block items"><ul><li><a href="#methods">Methods</a></li></ul></div><p class='location'><a href='index.html'>whitespacers</a></p><script>window.sidebarCurrent = {name: 'Interpreter', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
     </nav>
 
     <nav class="sub">
@@ -42,38 +43,38 @@
         </form>
     </nav>
 
-    <section id='main' class="content struct">
-<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>whitespacers</a>::<wbr><a class='struct' href=''>Interpreter</a></span><span class='out-of-band'><span id='render-detail'>
+    <section id='main' class="content">
+<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>whitespacers</a>::<wbr><a class="struct" href=''>Interpreter</a></span><span class='out-of-band'><span id='render-detail'>
                    <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
                        [<span class='inner'>&#x2212;</span>]
                    </a>
-               </span><a id='src-592' class='srclink' href='../src/whitespacers/src/core/mod.rs.html#393-398' title='goto source code'>[src]</a></span></h1>
+               </span><a class='srclink' href='../src/whitespacers/core/mod.rs.html#394-399' title='goto source code'>[src]</a></span></h1>
 <pre class='rust struct'>pub struct Interpreter&lt;'a&gt; { /* fields omitted */ }</pre><div class='docblock'><p>A whitespace interpreter. This struct provides various strategies for interpreting a whitespace program.</p>
-</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl&lt;'a&gt; <a class='struct' href='../whitespacers/struct.Interpreter.html' title='whitespacers::Interpreter'>Interpreter</a>&lt;'a&gt;</code></span><span class='out-of-band'><div class='ghost'></div><a id='src-598' class='srclink' href='../src/whitespacers/src/core/mod.rs.html#400-695' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.new' class='method'><span id='new.v' class='invisible'><code>fn <a href='#method.new' class='fnname'>new</a>(program: &amp;'a <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; options: <a class='struct' href='../whitespacers/struct.Options.html' title='whitespacers::Options'>Options</a>,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; input: &amp;'a mut <a class='trait' href='https://doc.rust-lang.org/nightly/std/io/trait.BufRead.html' title='std::io::BufRead'>BufRead</a> + 'a,<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; output: &amp;'a mut <a class='trait' href='https://doc.rust-lang.org/nightly/std/io/trait.Write.html' title='std::io::Write'>Write</a> + 'a)<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; -&gt; <a class='struct' href='../whitespacers/struct.Interpreter.html' title='whitespacers::Interpreter'>Interpreter</a>&lt;'a&gt;</code></span></h4>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl&lt;'a&gt; <a class="struct" href="../whitespacers/struct.Interpreter.html" title="struct whitespacers::Interpreter">Interpreter</a>&lt;'a&gt;</code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/core/mod.rs.html#401-694' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.new' class="method"><span id='new.v' class='invisible'><code>fn <a href='#method.new' class='fnname'>new</a>(<br>&nbsp;&nbsp;&nbsp;&nbsp;program: &amp;'a <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;options: <a class="struct" href="../whitespacers/struct.Options.html" title="struct whitespacers::Options">Options</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;input: &amp;'a mut <a class="trait" href="https://doc.rust-lang.org/nightly/std/io/trait.BufRead.html" title="trait std::io::BufRead">BufRead</a> + 'a, <br>&nbsp;&nbsp;&nbsp;&nbsp;output: &amp;'a mut <a class="trait" href="https://doc.rust-lang.org/nightly/std/io/trait.Write.html" title="trait std::io::Write">Write</a> + 'a<br>) -&gt; <a class="struct" href="../whitespacers/struct.Interpreter.html" title="struct whitespacers::Interpreter">Interpreter</a>&lt;'a&gt;</code></span></h4>
 <div class='docblock'><p>Construct a new whitespace interpreter from a program, input stream and output stream with the specified options.</p>
-</div><h4 id='method.count_with_simple_state' class='method'><span id='count_with_simple_state.v' class='invisible'><code>fn <a href='#method.count_with_simple_state' class='fnname'>count_with_simple_state</a>(&amp;'a mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.usize.html'>usize</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.count_with_simple_state' class="method"><span id='count_with_simple_state.v' class='invisible'><code>fn <a href='#method.count_with_simple_state' class='fnname'>count_with_simple_state</a>(&amp;'a mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Similar to Interpreter::interpret_with_simple_state but does not have bigint fallback
 and returns the amount of executed instructions on success.</p>
-</div><h4 id='method.interpret_with_simple_state' class='method'><span id='interpret_with_simple_state.v' class='invisible'><code>fn <a href='#method.interpret_with_simple_state' class='fnname'>interpret_with_simple_state</a>(&amp;'a mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.interpret_with_simple_state' class="method"><span id='interpret_with_simple_state.v' class='invisible'><code>fn <a href='#method.interpret_with_simple_state' class='fnname'>interpret_with_simple_state</a>(&amp;'a mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">()</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>The reference interpreter implementation. It uses simple data structures internally, falling back to
 bignum-based simple datastructures if values become too large.</p>
-</div><h4 id='method.interpret_with_fast_state' class='method'><span id='interpret_with_fast_state.v' class='invisible'><code>fn <a href='#method.interpret_with_fast_state' class='fnname'>interpret_with_fast_state</a>(&amp;'a mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.interpret_with_fast_state' class="method"><span id='interpret_with_fast_state.v' class='invisible'><code>fn <a href='#method.interpret_with_fast_state' class='fnname'>interpret_with_fast_state</a>(&amp;'a mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">()</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Interprets the program with optimized data structures, falling back to
 bignum-based simple datastructures if values become too large. </p>
-</div><h4 id='method.interpret_with_bigint_state' class='method'><span id='interpret_with_bigint_state.v' class='invisible'><code>fn <a href='#method.interpret_with_bigint_state' class='fnname'>interpret_with_bigint_state</a>(&amp;'a mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.interpret_with_bigint_state' class="method"><span id='interpret_with_bigint_state.v' class='invisible'><code>fn <a href='#method.interpret_with_bigint_state' class='fnname'>interpret_with_bigint_state</a>(&amp;'a mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">()</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Interpret the program using only bignum-based simple datastructures. This is slow.</p>
-</div><h4 id='method.jit_aot' class='method'><span id='jit_aot.v' class='invisible'><code>fn <a href='#method.jit_aot' class='fnname'>jit_aot</a>(&amp;mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.jit_aot' class="method"><span id='jit_aot.v' class='invisible'><code>fn <a href='#method.jit_aot' class='fnname'>jit_aot</a>(&amp;mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">()</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Use a jit compiler that compiles the entire program in advance to execute
 the program. It is backed by an optimized datastructure, and will fall back
 to interpretation in unsafe situations. When values become too large it will
 fall back to bignum-based interpretation.</p>
-</div><h4 id='method.jit_sync' class='method'><span id='jit_sync.v' class='invisible'><code>fn <a href='#method.jit_sync' class='fnname'>jit_sync</a>(&amp;mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.jit_sync' class="method"><span id='jit_sync.v' class='invisible'><code>fn <a href='#method.jit_sync' class='fnname'>jit_sync</a>(&amp;mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">()</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Use a jit compiler that compiles code synchronously while executing
 the program. It is backed by an optimized datastructure, and will fall back
 to interpretation in unsafe situations. When values become too large it will
 fall back to bignum-based interpretation.</p>
-</div><h4 id='method.jit_threaded' class='method'><span id='jit_threaded.v' class='invisible'><code>fn <a href='#method.jit_threaded' class='fnname'>jit_threaded</a>(&amp;mut self) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, <a class='struct' href='../whitespacers/struct.WsError.html' title='whitespacers::WsError'>WsError</a>&gt;</code></span></h4>
+</div><h4 id='method.jit_threaded' class="method"><span id='jit_threaded.v' class='invisible'><code>fn <a href='#method.jit_threaded' class='fnname'>jit_threaded</a>(&amp;mut self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">()</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Use a jit compiler that compiles the program in a separate thread while executing
 the program. It is backed by an optimized datastructure, and will fall back
 to interpretation in unsafe situations. When values become too large it will

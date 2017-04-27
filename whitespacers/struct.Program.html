@@ -9,6 +9,7 @@
 
     <title>whitespacers::Program - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
     <link rel="stylesheet" type="text/css" href="../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../main.css">
     
@@ -16,7 +17,7 @@
     
     
 </head>
-<body class="rustdoc">
+<body class="rustdoc struct">
     <!--[if lte IE 8]>
     <div class="warning">
         This old browser is unsupported and will most likely display funky
@@ -28,7 +29,7 @@
 
     <nav class="sidebar">
         
-        <p class='location'><a href='index.html'>whitespacers</a></p><script>window.sidebarCurrent = {name: 'Program', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+        <p class='location'>Struct Program</p><div class="block items"><ul><li><a href="#methods">Methods</a></li><li><a href="#implementations">Trait Implementations</a></li></ul></div><p class='location'><a href='index.html'>whitespacers</a></p><script>window.sidebarCurrent = {name: 'Program', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
     </nav>
 
     <nav class="sub">
@@ -42,34 +43,34 @@
         </form>
     </nav>
 
-    <section id='main' class="content struct">
-<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>whitespacers</a>::<wbr><a class='struct' href=''>Program</a></span><span class='out-of-band'><span id='render-detail'>
+    <section id='main' class="content">
+<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>whitespacers</a>::<wbr><a class="struct" href=''>Program</a></span><span class='out-of-band'><span id='render-detail'>
                    <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
                        [<span class='inner'>&#x2212;</span>]
                    </a>
-               </span><a id='src-2118' class='srclink' href='../src/whitespacers/src/lib.rs.html#37-42' title='goto source code'>[src]</a></span></h1>
+               </span><a class='srclink' href='../src/whitespacers/lib.rs.html#37-42' title='goto source code'>[src]</a></span></h1>
 <pre class='rust struct'>pub struct Program { /* fields omitted */ }</pre><div class='docblock'><p>This struct contains the internal representation of a whitespace program.</p>
-</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-1015' class='srclink' href='../src/whitespacers/src/program.rs.html#57-63' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.strip' class='method'><span id='strip.v' class='invisible'><code>fn <a href='#method.strip' class='fnname'>strip</a>(&amp;mut self)</code></span></h4>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><span class='in-band'><code>impl <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/program.rs.html#57-63' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.strip' class="method"><span id='strip.v' class='invisible'><code>fn <a href='#method.strip' class='fnname'>strip</a>(&amp;mut self)</code></span></h4>
 <div class='docblock'><p>Remove source location information from the program.</p>
-</div></div><h3 class='impl'><span class='in-band'><code>impl <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-1052' class='srclink' href='../src/whitespacers/src/parser.rs.html#136-309' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.parse' class='method'><span id='parse.v' class='invisible'><code>fn <a href='#method.parse' class='fnname'>parse</a>(code: <a class='struct' href='https://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html' title='collections::vec::Vec'>Vec</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>&gt;) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a>, <a class='struct' href='../whitespacers/struct.WsParseError.html' title='whitespacers::WsParseError'>WsParseError</a>&gt;</code></span></h4>
+</div></div><h3 class='impl'><span class='in-band'><code>impl <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/parser.rs.html#138-312' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.parse' class="method"><span id='parse.v' class='invisible'><code>fn <a href='#method.parse' class='fnname'>parse</a>(code: <a class="struct" href="https://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html" title="struct collections::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>&gt;) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Parse a program written in whitespace to a format suitable
 for execution.</p>
-</div><h4 id='method.dump' class='method'><span id='dump.v' class='invisible'><code>fn <a href='#method.dump' class='fnname'>dump</a>(&amp;self) -&gt; <a class='struct' href='https://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html' title='collections::vec::Vec'>Vec</a>&lt;<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>&gt;</code></span></h4>
+</div><h4 id='method.dump' class="method"><span id='dump.v' class='invisible'><code>fn <a href='#method.dump' class='fnname'>dump</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html" title="struct collections::vec::Vec">Vec</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>&gt;</code></span></h4>
 <div class='docblock'><p>Serialize the internal representation back into a whitespace program.</p>
-</div></div><h3 class='impl'><span class='in-band'><code>impl <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-1140' class='srclink' href='../src/whitespacers/src/assembler.rs.html#8-89' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.disassemble' class='method'><span id='disassemble.v' class='invisible'><code>fn <a href='#method.disassemble' class='fnname'>disassemble</a>(&amp;self) -&gt; <a class='struct' href='https://doc.rust-lang.org/nightly/collections/string/struct.String.html' title='collections::string::String'>String</a></code></span></h4>
+</div></div><h3 class='impl'><span class='in-band'><code>impl <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/assembler.rs.html#9-90' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.disassemble' class="method"><span id='disassemble.v' class='invisible'><code>fn <a href='#method.disassemble' class='fnname'>disassemble</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/collections/string/struct.String.html" title="struct collections::string::String">String</a></code></span></h4>
 <div class='docblock'><p>Disassemble a program into a human-readable whitespace assembly.</p>
-</div><h4 id='method.assemble' class='method'><span id='assemble.v' class='invisible'><code>fn <a href='#method.assemble' class='fnname'>assemble</a>(source: <a class='struct' href='https://doc.rust-lang.org/nightly/collections/string/struct.String.html' title='collections::string::String'>String</a>) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;<a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a>, <a class='struct' href='../whitespacers/struct.WsParseError.html' title='whitespacers::WsParseError'>WsParseError</a>&gt;</code></span></h4>
+</div><h4 id='method.assemble' class="method"><span id='assemble.v' class='invisible'><code>fn <a href='#method.assemble' class='fnname'>assemble</a>(source: <a class="struct" href="https://doc.rust-lang.org/nightly/collections/string/struct.String.html" title="struct collections::string::String">String</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a>, <a class="struct" href="../whitespacers/struct.WsError.html" title="struct whitespacers::WsError">WsError</a>&gt;</code></span></h4>
 <div class='docblock'><p>Parse a program written in whitespace assembly into a program.</p>
-</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html' title='core::fmt::Debug'>Debug</a> for <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-2123' class='srclink' href='../src/whitespacers/src/lib.rs.html#36' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.fmt' class='method'><span id='fmt.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt' class='fnname'>fmt</a>(&amp;self, __arg_0: &amp;mut <a class='struct' href='https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html' title='core::fmt::Formatter'>Formatter</a>) -&gt; <a class='type' href='https://doc.rust-lang.org/nightly/core/fmt/type.Result.html' title='core::fmt::Result'>Result</a></code></span></h4>
+</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><span class='in-band'><code>impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html" title="trait core::fmt::Debug">Debug</a> for <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/lib.rs.html#36' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.fmt' class="method"><span id='fmt.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt' class='fnname'>fmt</a>(&amp;self, __arg_0: &amp;mut <a class="struct" href="https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html" title="struct core::fmt::Formatter">Formatter</a>) -&gt; <a class="type" href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html" title="type core::fmt::Result">Result</a></code></span></h4>
 <div class='docblock'><p>Formats the value using the given formatter.</p>
-</div></div><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html' title='core::clone::Clone'>Clone</a> for <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-2132' class='srclink' href='../src/whitespacers/src/lib.rs.html#36' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.clone' class='method'><span id='clone.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone' class='fnname'>clone</a>(&amp;self) -&gt; <a class='struct' href='../whitespacers/struct.Program.html' title='whitespacers::Program'>Program</a></code></span></h4>
+</div></div><h3 class='impl'><span class='in-band'><code>impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html" title="trait core::clone::Clone">Clone</a> for <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/lib.rs.html#36' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.clone' class="method"><span id='clone.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone' class='fnname'>clone</a>(&amp;self) -&gt; <a class="struct" href="../whitespacers/struct.Program.html" title="struct whitespacers::Program">Program</a></code></span></h4>
 <div class='docblock'><p>Returns a copy of the value. <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">Read more</a></p>
-</div><h4 id='method.clone_from' class='method'><span id='clone_from.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from' class='fnname'>clone_from</a>(&amp;mut self, source: &amp;Self)</code><div class='since' title='Stable since Rust version 1.0.0'>1.0.0</div></span></h4>
+</div><h4 id='method.clone_from' class="method"><span id='clone_from.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from' class='fnname'>clone_from</a>(&amp;mut self, source: &amp;Self)</code><div class='since' title='Stable since Rust version 1.0.0'>1.0.0</div></span></h4>
 <div class='docblock'><p>Performs copy-assignment from <code>source</code>. <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from">Read more</a></p>
 </div></div></section>
     <section id='search' class="content hidden"></section>

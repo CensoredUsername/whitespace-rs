@@ -9,6 +9,7 @@
 
     <title>whitespacers::WsErrorKind - Rust</title>
 
+    <link rel="stylesheet" type="text/css" href="../normalize.css">
     <link rel="stylesheet" type="text/css" href="../rustdoc.css">
     <link rel="stylesheet" type="text/css" href="../main.css">
     
@@ -16,7 +17,7 @@
     
     
 </head>
-<body class="rustdoc">
+<body class="rustdoc enum">
     <!--[if lte IE 8]>
     <div class="warning">
         This old browser is unsupported and will most likely display funky
@@ -28,7 +29,7 @@
 
     <nav class="sidebar">
         
-        <p class='location'><a href='index.html'>whitespacers</a></p><script>window.sidebarCurrent = {name: 'WsErrorKind', ty: 'enum', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+        <p class='location'>Enum WsErrorKind</p><div class="block items"><ul><li><a href="#variants">Variants</a></li><li><a href="#implementations">Trait Implementations</a></li></ul></div><p class='location'><a href='index.html'>whitespacers</a></p><script>window.sidebarCurrent = {name: 'WsErrorKind', ty: 'enum', relpath: ''};</script><script defer src="sidebar-items.js"></script>
     </nav>
 
     <nav class="sub">
@@ -42,43 +43,45 @@
         </form>
     </nav>
 
-    <section id='main' class="content enum">
-<h1 class='fqn'><span class='in-band'>Enum <a href='index.html'>whitespacers</a>::<wbr><a class='enum' href=''>WsErrorKind</a></span><span class='out-of-band'><span id='render-detail'>
+    <section id='main' class="content">
+<h1 class='fqn'><span class='in-band'>Enum <a href='index.html'>whitespacers</a>::<wbr><a class="enum" href=''>WsErrorKind</a></span><span class='out-of-band'><span id='render-detail'>
                    <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
                        [<span class='inner'>&#x2212;</span>]
                    </a>
-               </span><a id='src-2344' class='srclink' href='../src/whitespacers/src/lib.rs.html#112-138' title='goto source code'>[src]</a></span></h1>
+               </span><a class='srclink' href='../src/whitespacers/lib.rs.html#111-138' title='goto source code'>[src]</a></span></h1>
 <pre class='rust enum'>pub enum WsErrorKind {
+    ParseError(<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,&nbsp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,&nbsp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>),
     StackError,
     KeyError,
     InvalidIndex,
     CallStackError,
     DivisionError,
     IOError,
-    ParseError,
+    RuntimeParseError,
     Overflow,
-    InumOverflow(<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.i64.html'>i64</a>,&nbsp;BigInt),
+    InumOverflow(<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.i64.html">i64</a>,&nbsp;<a class="struct" href="https://rust-num.github.io/num/num_bigint/bigint/struct.BigInt.html" title="struct num_bigint::bigint::BigInt">BigInt</a>),
 }</pre><div class='docblock'><p>Simple information on what kind of error occurred.</p>
-</div><h2 class='variants'>Variants</h2>
-<span id='variant.StackError' class='variant'><span id='StackError.v' class='invisible'><code>StackError</code></span></span><div class='docblock'><p>The stack was not of the correct size to execute an instruction.</p>
+</div><h2 id='variants' class='variants'>Variants</h2>
+<span id='variant.ParseError' class='variant'><span id='ParseError.v' class='invisible'><code>ParseError(<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,&nbsp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,&nbsp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>)</code></span></span><div class='docblock'><p>Compile-time parse error</p>
+</div><span id='variant.StackError' class='variant'><span id='StackError.v' class='invisible'><code>StackError</code></span></span><div class='docblock'><p>The stack was not of the correct size to execute an instruction.</p>
 </div><span id='variant.KeyError' class='variant'><span id='KeyError.v' class='invisible'><code>KeyError</code></span></span><div class='docblock'><p>A missing key was requested from the heap.</p>
 </div><span id='variant.InvalidIndex' class='variant'><span id='InvalidIndex.v' class='invisible'><code>InvalidIndex</code></span></span><div class='docblock'><p>The program tried to execute an instruction that doesn&#39;t exist (generally caused by control flow hitting the end of the program).</p>
 </div><span id='variant.CallStackError' class='variant'><span id='CallStackError.v' class='invisible'><code>CallStackError</code></span></span><div class='docblock'><p>The program tried to return but there was no location to return to on the callstack.</p>
 </div><span id='variant.DivisionError' class='variant'><span id='DivisionError.v' class='invisible'><code>DivisionError</code></span></span><div class='docblock'><p>Division or Modulo by zero.</p>
 </div><span id='variant.IOError' class='variant'><span id='IOError.v' class='invisible'><code>IOError</code></span></span><div class='docblock'><p>Something went wrong while trying to read from input or write to output.</p>
-</div><span id='variant.ParseError' class='variant'><span id='ParseError.v' class='invisible'><code>ParseError</code></span></span><div class='docblock'><p>The program tried to read a number but no number was given.</p>
+</div><span id='variant.RuntimeParseError' class='variant'><span id='RuntimeParseError.v' class='invisible'><code>RuntimeParseError</code></span></span><div class='docblock'><p>The program tried to read a number but no number was given.</p>
 </div><span id='variant.Overflow' class='variant'><span id='Overflow.v' class='invisible'><code>Overflow</code></span></span><div class='docblock'><p>An overflow occurred during an arithmetric operation. This will normally not be returned unless fallback is disabled.</p>
-</div><span id='variant.InumOverflow' class='variant'><span id='InumOverflow.v' class='invisible'><code>InumOverflow(<a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.i64.html'>i64</a>,&nbsp;BigInt)</code></span></span><div class='docblock'><p>An overflow occurred when a number input was requested. This is a bit of a special case, as the state cannot
+</div><span id='variant.InumOverflow' class='variant'><span id='InumOverflow.v' class='invisible'><code>InumOverflow(<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.i64.html">i64</a>,&nbsp;<a class="struct" href="https://rust-num.github.io/num/num_bigint/bigint/struct.BigInt.html" title="struct num_bigint::bigint::BigInt">BigInt</a>)</code></span></span><div class='docblock'><p>An overflow occurred when a number input was requested. This is a bit of a special case, as the state cannot
 be rewound to before the number was parsed. Therefore, the key where the number will be read to, and the 
 oversized integer that was parsed are returned in the error, and the location at which the error occurred
 is set to be the operation after the failed inum operation. Again, this will not be returned unless fallback is disabled.</p>
-</div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html' title='core::fmt::Debug'>Debug</a> for <a class='enum' href='../whitespacers/enum.WsErrorKind.html' title='whitespacers::WsErrorKind'>WsErrorKind</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-2356' class='srclink' href='../src/whitespacers/src/lib.rs.html#111' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.fmt' class='method'><span id='fmt.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt' class='fnname'>fmt</a>(&amp;self, __arg_0: &amp;mut <a class='struct' href='https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html' title='core::fmt::Formatter'>Formatter</a>) -&gt; <a class='type' href='https://doc.rust-lang.org/nightly/core/fmt/type.Result.html' title='core::fmt::Result'>Result</a></code></span></h4>
+</div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><span class='in-band'><code>impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html" title="trait core::fmt::Debug">Debug</a> for <a class="enum" href="../whitespacers/enum.WsErrorKind.html" title="enum whitespacers::WsErrorKind">WsErrorKind</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/lib.rs.html#110' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.fmt' class="method"><span id='fmt.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt' class='fnname'>fmt</a>(&amp;self, __arg_0: &amp;mut <a class="struct" href="https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html" title="struct core::fmt::Formatter">Formatter</a>) -&gt; <a class="type" href="https://doc.rust-lang.org/nightly/core/fmt/type.Result.html" title="type core::fmt::Result">Result</a></code></span></h4>
 <div class='docblock'><p>Formats the value using the given formatter.</p>
-</div></div><h3 class='impl'><span class='in-band'><code>impl <a class='trait' href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html' title='core::clone::Clone'>Clone</a> for <a class='enum' href='../whitespacers/enum.WsErrorKind.html' title='whitespacers::WsErrorKind'>WsErrorKind</a></code></span><span class='out-of-band'><div class='ghost'></div><a id='src-2371' class='srclink' href='../src/whitespacers/src/lib.rs.html#111' title='goto source code'>[src]</a></span></h3>
-<div class='impl-items'><h4 id='method.clone' class='method'><span id='clone.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone' class='fnname'>clone</a>(&amp;self) -&gt; <a class='enum' href='../whitespacers/enum.WsErrorKind.html' title='whitespacers::WsErrorKind'>WsErrorKind</a></code></span></h4>
+</div></div><h3 class='impl'><span class='in-band'><code>impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html" title="trait core::clone::Clone">Clone</a> for <a class="enum" href="../whitespacers/enum.WsErrorKind.html" title="enum whitespacers::WsErrorKind">WsErrorKind</a></code></span><span class='out-of-band'><div class='ghost'></div><a class='srclink' href='../src/whitespacers/lib.rs.html#110' title='goto source code'>[src]</a></span></h3>
+<div class='impl-items'><h4 id='method.clone' class="method"><span id='clone.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone' class='fnname'>clone</a>(&amp;self) -&gt; <a class="enum" href="../whitespacers/enum.WsErrorKind.html" title="enum whitespacers::WsErrorKind">WsErrorKind</a></code></span></h4>
 <div class='docblock'><p>Returns a copy of the value. <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">Read more</a></p>
-</div><h4 id='method.clone_from' class='method'><span id='clone_from.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from' class='fnname'>clone_from</a>(&amp;mut self, source: &amp;Self)</code><div class='since' title='Stable since Rust version 1.0.0'>1.0.0</div></span></h4>
+</div><h4 id='method.clone_from' class="method"><span id='clone_from.v' class='invisible'><code>fn <a href='https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from' class='fnname'>clone_from</a>(&amp;mut self, source: &amp;Self)</code><div class='since' title='Stable since Rust version 1.0.0'>1.0.0</div></span></h4>
 <div class='docblock'><p>Performs copy-assignment from <code>source</code>. <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from">Read more</a></p>
 </div></div></section>
     <section id='search' class="content hidden"></section>
