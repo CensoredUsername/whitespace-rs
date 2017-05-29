@@ -164,13 +164,16 @@ impl WsError {
     pub fn format_with_program(&self, program: &Program) -> String {
         if let Some(index) = self.location {
             if let Some(ref locs) = program.locs {
-                let loc = &locs[index];
-                if let Ok(text) = str::from_utf8(&program.source.as_ref().unwrap()[loc.span.clone()]) {
-                    return format!("At command {} (line {}, column {}):\n{}\n\"{}\"",
-                                   index + 1, loc.line, loc.column, self.message, text);
+                if let Some(loc) = locs.get(index) {
+                    if let Ok(text) = str::from_utf8(&program.source.as_ref().unwrap()[loc.span.clone()]) {
+                        return format!("At command {} (line {}, column {}):\n{}\n\"{}\"",
+                                       index + 1, loc.line, loc.column, self.message, text);
+                    } else {
+                        return format!("At command {} (line {}, column {}):\n{}",
+                                       index + 1, loc.line, loc.column, self.message);
+                    }
                 } else {
-                    return format!("At command {} (line {}, column {}):\n{}",
-                                   index + 1, loc.line, loc.column, self.message);
+                    return format!("At the end of the program:\n{}", self.message);
                 }
             } 
             return format!("At command {}:\n{}", index + 1, self.message);
