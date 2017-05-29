@@ -1,6 +1,6 @@
 [package]
 name = "whitespacers"
-version = "0.1.0"
+version = "0.1.1"
 authors = [ "CensoredUsername cens.username@gmail.com" ]
 
 description = "A whitespace JIT-compiler, for when your whitespace just isn't executing fast enough."
