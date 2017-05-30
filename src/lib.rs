@@ -89,6 +89,8 @@ bitflags! {
         const UNCHECKED_HEAP     = 0b0000_0010;
         /// Don't fall back to biginteger interpretation on overflow, instead return an overflow error.
         const NO_FALLBACK        = 0b0001_0000;
+        /// Raise an error on hitting the end of the program instead of cleanly exiting
+        const NO_IMPLICIT_EXIT   = 0b0010_0000;
 
         // features
         // const NEGATIVE_COPY   = 0b0000_1000,

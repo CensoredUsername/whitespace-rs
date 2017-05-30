@@ -6,7 +6,7 @@ use std::io::{self, Write, Read, BufRead};
 use std::fs::File;
 use std::time::Instant;
 
-use whitespacers::{Program, Interpreter, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK, debug_compile};
+use whitespacers::{Program, Interpreter, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK, NO_IMPLICIT_EXIT, debug_compile};
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -254,6 +254,11 @@ fn parse_args() -> Result<Args, String> {
                 } else {
                     options |= NO_FALLBACK;
                 },
+                "--no-implicit-exit" => if options.contains(NO_IMPLICIT_EXIT) {
+                    return Err("Option --no-implicit-exit was specified twice".to_string());
+                } else {
+                    options |= NO_IMPLICIT_EXIT;
+                },
                 "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE | -c] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback]
 
 wsc - A really fast whitespace JIT-compiler.
@@ -300,6 +305,9 @@ Options:
                              configures the interpreter to return 0 instead.
     --no-fallback           On overflow, generate an error instead of switching to a bignum
                              interpreter.
+    --no-implicit-exit      By default, the compiler exits cleanly if the end of the program is
+                             reached, even when no exit command is present. This flag disables
+                             this behaviour.
 
 Assembly format:
     

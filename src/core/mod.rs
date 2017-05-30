@@ -13,7 +13,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use program::{Program, Command, Integer, BigInteger};
-use super::{WsError, WsErrorKind, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK};
+use super::{WsError, WsErrorKind, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK, NO_IMPLICIT_EXIT};
 
 mod cached_map;
 use self::cached_map::{CacheEntry, CACHE_MASK};
@@ -298,7 +298,12 @@ pub trait State<'a> {
             };
             *self.index() += 1;
         }
-        Err(WsError::new(WsErrorKind::IOError, "Invalid program counter"))
+
+        if options.contains(NO_IMPLICIT_EXIT) {
+            Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -537,7 +542,11 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        if self.options.contains(NO_IMPLICIT_EXIT) {
+            Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        } else {
+            Ok(())
+        }
     }
 
     /// Use a jit compiler that compiles code synchronously while executing
@@ -612,7 +621,11 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        if self.options.contains(NO_IMPLICIT_EXIT) {
+            Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        } else {
+            Ok(())
+        }
     }
 
     /// Use a jit compiler that compiles the program in a separate thread while executing
@@ -621,75 +634,83 @@ impl<'a> Interpreter<'a> {
     /// fall back to bignum-based interpretation.
     #[cfg(target_arch = "x86_64")]
     pub fn jit_threaded(&mut self) -> Result<(), WsError> {
-        let program = &self.program;
-        let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
-        let mut compiler = JitCompiler::new(program, self.options);
-        let mut jit_handles = vec![None; program.commands.len()];
+        // the compiler and comms channel need to live to the end of the crossbeam scope
+        let mut compiler = JitCompiler::new(self.program, self.options);
         let (jit_finished_send, jit_finished_receive) = mpsc::channel();
 
-        let executor = compiler.executor();
+        crossbeam::scope(|scope| {
+            // get an executor before we move the compiler to the thread.
+            let executor = compiler.executor();
 
-        // this thread compiles our code in the background.
-        let compiler_borrow = &mut compiler;
-        let _compile_thread = crossbeam::scope(|scope| scope.spawn(move || {
-            use program::Command::*;
-            for (i, c) in compiler_borrow.commands.iter().enumerate() {
-                let i = match *c {
-                    Label | Call {..} if i + 1 != compiler_borrow.commands.len() => i + 1,
-                    _ => continue
-                };
+            // this thread compiles our code in the background.
+            scope.spawn(move || {
+                use program::Command::*;
+                for (i, c) in compiler.commands.iter().enumerate() {
+                    let i = match *c {
+                        Label | Call {..} if i + 1 != compiler.commands.len() => i + 1,
+                        _ => continue
+                    };
 
-                if let Some(start) = compiler_borrow.compile_index(i) {
-                    compiler_borrow.commit();
-                    if jit_finished_send.send((i, start)).is_err() {
-                        break;
+                    if let Some(start) = compiler.compile_index(i) {
+                        compiler.commit();
+                        if jit_finished_send.send((i, start)).is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
+            let mut jit_handles = vec![None; self.program.commands.len()];
+
+            while let Some(&offset) = jit_handles.get(*state.index()) {
+                // can we jit?
+                if let Some(offset) = offset {
+                    let old_index = *state.index();
+
+                    unsafe {
+                        let lock = executor.lock();
+                        state.run_block(lock.ptr(offset));
+                    }
+                    // not a bail-out
+                    if old_index != *state.index() {
+                        continue;
+                    }
+                }
+
+                // hot loop optimization: only check for new chunks when we fall back to interpreting.
+                while let Ok((index, offset)) = jit_finished_receive.try_recv() {
+                    jit_handles[index] = Some(offset);
+                }
+
+                // fallback interpreting.
+                match state.interpret_block(&self.program.commands) {
+                    Ok(true) => (),
+                    Ok(false) => {
+                        drop(jit_finished_receive);
+                        return Ok(())
+                    },
+                    Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                        drop(jit_finished_receive);
+                        e.set_location(*state.index());
+                        return Err(e);
+                    } else {
+                        drop(jit_finished_receive);
+                        e.set_location(*state.index());
+                        return Self::bigint_fallback(&mut state, self.program, e)
                     }
                 }
             }
-        }));
 
-        while let Some(&offset) = jit_handles.get(*state.index()) {
-            // can we jit?
-            if let Some(offset) = offset {
-                let old_index = *state.index();
+            // drop the channel so the compilation thread will terminate soon
+            drop(jit_finished_receive);
 
-                unsafe {
-                    let lock = executor.lock();
-                    state.run_block(lock.ptr(offset));
-                }
-                // not a bail-out
-                if old_index != *state.index() {
-                    continue;
-                }
+            if self.options.contains(NO_IMPLICIT_EXIT) {
+                Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+            } else {
+                Ok(())
             }
-
-            // hot loop optimization: only check for new chunks when we fall back to interpreting.
-            while let Ok((index, offset)) = jit_finished_receive.try_recv() {
-                jit_handles[index] = Some(offset);
-            }
-
-            // fallback interpreting.
-            match state.interpret_block(&program.commands) {
-                Ok(true) => (),
-                Ok(false) => {
-                    drop(jit_finished_receive);
-                    return Ok(())
-                },
-                Err(mut e) => if self.options.contains(NO_FALLBACK) {
-                    drop(jit_finished_receive);
-                    e.set_location(*state.index());
-                    return Err(e);
-                } else {
-                    drop(jit_finished_receive);
-                    e.set_location(*state.index());
-                    return Self::bigint_fallback(&mut state, program, e)
-                }
-            }
-        }
-
-        // drop the channel so the compilation thread will terminate soon
-        drop(jit_finished_receive);
-        Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
+        })
     }
 }
 
