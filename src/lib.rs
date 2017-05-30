@@ -80,16 +80,15 @@ impl Program {
     }
 }
 
-
 bitflags! {
     /// These are bitflag options to alter the behaviour of the interpreter.
-    pub flags Options: u8 {
+    pub struct Options: u8 {
         /// Use wrapping arithmetric instead of detecting overflow and falling back
-        const IGNORE_OVERFLOW    = 0b0000_0001,
+        const IGNORE_OVERFLOW    = 0b0000_0001;
         /// When an unknown key used to get an item from the heap, return 0 instead of causing an error.
-        const UNCHECKED_HEAP     = 0b0000_0010,
+        const UNCHECKED_HEAP     = 0b0000_0010;
         /// Don't fall back to biginteger interpretation on overflow, instead return an overflow error.
-        const NO_FALLBACK        = 0b0001_0000,
+        const NO_FALLBACK        = 0b0001_0000;
 
         // features
         // const NEGATIVE_COPY   = 0b0000_1000,
