@@ -252,6 +252,8 @@
 <span id="207">207</span>
 <span id="208">208</span>
 <span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
 </pre><pre class="rust ">
 <span class="attribute">#<span class="op">!</span>[<span class="ident">feature</span>(<span class="ident">plugin</span>)]</span>
 <span class="attribute">#<span class="op">!</span>[<span class="ident">plugin</span>(<span class="ident">dynasm</span>)]</span>
@@ -335,16 +337,15 @@
     }
 }
 
-
 <span class="macro">bitflags</span><span class="macro">!</span> {
     <span class="doccomment">/// These are bitflag options to alter the behaviour of the interpreter.</span>
-    <span class="kw">pub</span> <span class="ident">flags</span> <span class="ident">Options</span>: <span class="ident">u8</span> {
+    <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Options</span>: <span class="ident">u8</span> {
         <span class="doccomment">/// Use wrapping arithmetric instead of detecting overflow and falling back</span>
-        <span class="kw">const</span> <span class="ident">IGNORE_OVERFLOW</span>    <span class="op">=</span> <span class="number">0b0000_0001</span>,
+        <span class="kw">const</span> <span class="ident">IGNORE_OVERFLOW</span>    <span class="op">=</span> <span class="number">0b0000_0001</span>;
         <span class="doccomment">/// When an unknown key used to get an item from the heap, return 0 instead of causing an error.</span>
-        <span class="kw">const</span> <span class="ident">UNCHECKED_HEAP</span>     <span class="op">=</span> <span class="number">0b0000_0010</span>,
+        <span class="kw">const</span> <span class="ident">UNCHECKED_HEAP</span>     <span class="op">=</span> <span class="number">0b0000_0010</span>;
         <span class="doccomment">/// Don&#39;t fall back to biginteger interpretation on overflow, instead return an overflow error.</span>
-        <span class="kw">const</span> <span class="ident">NO_FALLBACK</span>        <span class="op">=</span> <span class="number">0b0001_0000</span>,
+        <span class="kw">const</span> <span class="ident">NO_FALLBACK</span>        <span class="op">=</span> <span class="number">0b0001_0000</span>;
 
         <span class="comment">// features</span>
         <span class="comment">// const NEGATIVE_COPY   = 0b0000_1000,</span>
@@ -419,13 +420,16 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">format_with_program</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">program</span>: <span class="kw-2">&amp;</span><span class="ident">Program</span>) <span class="op">-&gt;</span> <span class="ident">String</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">index</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">location</span> {
             <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="ident">locs</span>) <span class="op">=</span> <span class="ident">program</span>.<span class="ident">locs</span> {
-                <span class="kw">let</span> <span class="ident">loc</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">locs</span>[<span class="ident">index</span>];
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">text</span>) <span class="op">=</span> <span class="ident">str</span>::<span class="ident">from_utf8</span>(<span class="kw-2">&amp;</span><span class="ident">program</span>.<span class="ident">source</span>.<span class="ident">as_ref</span>().<span class="ident">unwrap</span>()[<span class="ident">loc</span>.<span class="ident">span</span>.<span class="ident">clone</span>()]) {
-                    <span class="kw">return</span> <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;At command {} (line {}, column {}):\n{}\n\&quot;{}\&quot;&quot;</span>,
-                                   <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">loc</span>.<span class="ident">line</span>, <span class="ident">loc</span>.<span class="ident">column</span>, <span class="self">self</span>.<span class="ident">message</span>, <span class="ident">text</span>);
+                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">loc</span>) <span class="op">=</span> <span class="ident">locs</span>.<span class="ident">get</span>(<span class="ident">index</span>) {
+                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">text</span>) <span class="op">=</span> <span class="ident">str</span>::<span class="ident">from_utf8</span>(<span class="kw-2">&amp;</span><span class="ident">program</span>.<span class="ident">source</span>.<span class="ident">as_ref</span>().<span class="ident">unwrap</span>()[<span class="ident">loc</span>.<span class="ident">span</span>.<span class="ident">clone</span>()]) {
+                        <span class="kw">return</span> <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;At command {} (line {}, column {}):\n{}\n\&quot;{}\&quot;&quot;</span>,
+                                       <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">loc</span>.<span class="ident">line</span>, <span class="ident">loc</span>.<span class="ident">column</span>, <span class="self">self</span>.<span class="ident">message</span>, <span class="ident">text</span>);
+                    } <span class="kw">else</span> {
+                        <span class="kw">return</span> <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;At command {} (line {}, column {}):\n{}&quot;</span>,
+                                       <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">loc</span>.<span class="ident">line</span>, <span class="ident">loc</span>.<span class="ident">column</span>, <span class="self">self</span>.<span class="ident">message</span>);
+                    }
                 } <span class="kw">else</span> {
-                    <span class="kw">return</span> <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;At command {} (line {}, column {}):\n{}&quot;</span>,
-                                   <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">loc</span>.<span class="ident">line</span>, <span class="ident">loc</span>.<span class="ident">column</span>, <span class="self">self</span>.<span class="ident">message</span>);
+                    <span class="kw">return</span> <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;At the end of the program:\n{}&quot;</span>, <span class="self">self</span>.<span class="ident">message</span>);
                 }
             } 
             <span class="kw">return</span> <span class="macro">format</span><span class="macro">!</span>(<span class="string">&quot;At command {}:\n{}&quot;</span>, <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>, <span class="self">self</span>.<span class="ident">message</span>);
@@ -520,7 +524,6 @@
         window.rootPath = "../../";
         window.currentCrate = "whitespacers";
     </script>
-    <script src="../../jquery.js"></script>
     <script src="../../main.js"></script>
     <script defer src="../../search-index.js"></script>
 </body>
