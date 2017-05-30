@@ -254,6 +254,8 @@
 <span id="209">209</span>
 <span id="210">210</span>
 <span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
 </pre><pre class="rust ">
 <span class="attribute">#<span class="op">!</span>[<span class="ident">feature</span>(<span class="ident">plugin</span>)]</span>
 <span class="attribute">#<span class="op">!</span>[<span class="ident">plugin</span>(<span class="ident">dynasm</span>)]</span>
@@ -346,6 +348,8 @@
         <span class="kw">const</span> <span class="ident">UNCHECKED_HEAP</span>     <span class="op">=</span> <span class="number">0b0000_0010</span>;
         <span class="doccomment">/// Don&#39;t fall back to biginteger interpretation on overflow, instead return an overflow error.</span>
         <span class="kw">const</span> <span class="ident">NO_FALLBACK</span>        <span class="op">=</span> <span class="number">0b0001_0000</span>;
+        <span class="doccomment">/// Raise an error on hitting the end of the program instead of cleanly exiting</span>
+        <span class="kw">const</span> <span class="ident">NO_IMPLICIT_EXIT</span>   <span class="op">=</span> <span class="number">0b0010_0000</span>;
 
         <span class="comment">// features</span>
         <span class="comment">// const NEGATIVE_COPY   = 0b0000_1000,</span>
