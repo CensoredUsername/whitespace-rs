@@ -16,7 +16,8 @@ struct Args {
     output: Option<String>, // this is where we output data to. if None, stdin
     format: FileFormat,     // format of input file. default is Whitespace
     action: Action,         // output format. translate or execute.
-    perf: bool              // print perf info to stdout?
+    perf: bool,             // print perf info to stdout?
+    minify: bool            // when translating, minify the code as much as possible
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +67,7 @@ fn console_main() -> Result<(), Box<Error>> {
 
     let time_input = Instant::now();
 
-    let program = match args.format {
+    let mut program = match args.format {
         FileFormat::Whitespace => Program::parse(data.into_bytes())?,
         FileFormat::Assembly => Program::assemble(data)?
     };
@@ -87,9 +88,13 @@ fn console_main() -> Result<(), Box<Error>> {
 
     match args.action {
         Action::Translate => {
+            if args.minify {
+                program.minify();
+            }
+
             match args.format {
                 FileFormat::Whitespace => output.write_all(program.disassemble().as_bytes()),
-                FileFormat::Assembly   => output.write_all(program.dump().as_slice())
+                FileFormat::Assembly   => output.write_all(program.dump().as_slice()),
             }?;
 
             time_finish = Instant::now();
@@ -161,6 +166,7 @@ macro_rules! try_opt {
 
 fn parse_args() -> Result<Args, String> {
     let mut perf = false;
+    let mut minify = false;
     let mut input = None;
     let mut output = None;
     let mut format = None;
@@ -209,6 +215,11 @@ fn parse_args() -> Result<Args, String> {
                     return Err("Option --dump, --translate, --count or --execute was specified twice".to_string());
                 } else {
                     action = Some(Action::Translate);
+                },
+                "-m" | "--minify" => if minify {
+                    return Err("Option --minify was specified twice".to_string());
+                } else {
+                    minify = true;
                 },
                 "-c" | "--count" => if let Some(_) = action {
                     return Err("Option --dump, --translate, --count or --execute was specified twice".to_string());
@@ -277,6 +288,7 @@ Options:
                              of instructions executed.
     -t --translate          Instead of executing, translate the file to/from assembly, and write
                              the result to the specified output.
+    -m --minify             When translating, minify the resulting code by crushing label size.
     -d --dump    DUMPFILE   Just compiles the program into assembly and dumps the result into a
                              file. This is mainly for debugging.
     -p --perf               Prints performance information to stdout.
@@ -348,6 +360,7 @@ loop:
         output: output,
         format: format.unwrap_or(FileFormat::Whitespace),
         action: action.unwrap_or(Action::Execute(Strategy::AoT)),
-        perf: perf
+        perf: perf,
+        minify: minify
     })
 }
