@@ -880,7 +880,7 @@ impl<'a> JitCompiler<'a> {
             ; test retval, retval
             ; jnz >badstack
         );
-        epilogue!(self.ops, 0, start_index);
+        epilogue!(self.ops, , start_index);
 
         dynasm!(self.ops
             ;badstack:
@@ -914,9 +914,9 @@ impl<'a> JitCompiler<'a> {
                         let value = value as i32;
                         // Optimizations for operations commonly preceded by a Push. tends to shave
                         // away at least 2 instructions that hit memory
-                        let c2 = &commands.as_slice()[0];
-                        match *c2 {
-                            Add => {
+                        let c2 = commands.as_slice().get(0);
+                        match c2 {
+                            Some(&Add) => {
                                 let mut left = 0;
                                 allocator.stage(&mut self.ops).load(&mut left, offset).finish();
                                 if value == 1 {
@@ -940,7 +940,7 @@ impl<'a> JitCompiler<'a> {
                                 command_index += 1;
                                 (0, 1)
                             },
-                            Subtract => {
+                            Some(&Subtract) => {
                                 let mut left = 0;
                                 allocator.stage(&mut self.ops).load(&mut left, offset).finish();
                                 if value == 1 {
@@ -963,7 +963,7 @@ impl<'a> JitCompiler<'a> {
                                 command_index += 1;
                                 (0, 1)
                             },
-                            Multiply => {
+                            Some(&Multiply) => {
                                 if !self.options.contains(IGNORE_OVERFLOW) {
                                     let mut left = 0;
                                     let mut res = 0;
