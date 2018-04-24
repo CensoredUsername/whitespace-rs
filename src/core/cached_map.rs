@@ -25,7 +25,10 @@ pub const CACHE_MASK:    usize = CACHE_ENTRIES - 1;
 impl CachedMap {
     pub fn new() -> CachedMap {
         use std::mem::size_of;
+        #[cfg(target_arch="x86_64")]
         assert!(size_of::<CacheEntry>() == 1 << 4);
+        #[cfg(target_arch="x86")]
+        assert!(size_of::<CacheEntry>() == 1 << 3);
 
         let fnv = BuildHasherDefault::<FnvHasher>::default();
         CachedMap {
@@ -41,7 +44,7 @@ impl CachedMap {
     pub fn set(&mut self, key: Integer, value: Integer) {
         let key = key as usize;
 
-        let mut entry = &mut self.entries[key & CACHE_MASK];
+        let entry = &mut self.entries[key & CACHE_MASK];
 
         if entry.key == key | 1 {
             // same key

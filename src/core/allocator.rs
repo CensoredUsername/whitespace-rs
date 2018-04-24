@@ -1,9 +1,15 @@
+#[cfg(target_arch="x86_64")]
 use dynasmrt::x64::Assembler;
+#[cfg(target_arch="x86")]
+use dynasmrt::x86::Assembler;
 use dynasmrt::DynasmApi;
 use ::program::Integer;
 
 const DYNAMIC_REGS: usize = 4;
+#[cfg(target_arch="x86_64")]
 const REG_ENCODINGS: &'static [u8; DYNAMIC_REGS] = &[8, 9, 10, 11];
+#[cfg(target_arch="x86")]
+const REG_ENCODINGS: &'static [u8; DYNAMIC_REGS] = &[3, 5, 6, 7];
 
 #[derive(Debug, Clone)]
 pub struct RegAllocator {
@@ -18,13 +24,13 @@ impl RegAllocator {
     }
 
     pub fn set_offset(&mut self, reg: u8, offset: i32) {
-        let mut alloc = self.allocations.iter_mut().filter_map(|x| x.as_mut()).find(|x| x.reg == reg).unwrap();
+        let alloc = self.allocations.iter_mut().filter_map(|x| x.as_mut()).find(|x| x.reg == reg).unwrap();
         alloc.offset = offset;
         alloc.mutated = true;
     }
 
     pub fn modify(&mut self, reg: u8) {
-        let mut alloc = self.allocations.iter_mut().filter_map(|x| x.as_mut()).find(|x| x.reg == reg).unwrap();
+        let alloc = self.allocations.iter_mut().filter_map(|x| x.as_mut()).find(|x| x.reg == reg).unwrap();
         alloc.mutated = true;
     }
 
@@ -48,7 +54,7 @@ impl RegAllocator {
         for alloc in self.allocations.iter_mut().filter_map(|x| x.as_mut()) {
             if alloc.mutated {
                 dynasm!(ops
-                    ; mov stack => Integer[alloc.offset], Rq(alloc.reg)
+                    ; mov stack => Integer[alloc.offset], Ra(alloc.reg)
                 );
                 alloc.mutated = false;
             }
@@ -59,7 +65,7 @@ impl RegAllocator {
         for alloc in self.allocations.iter().filter_map(|x| x.as_ref()) {
             if alloc.mutated {
                 dynasm!(ops
-                    ; mov stack => Integer[alloc.offset], Rq(alloc.reg)
+                    ; mov stack => Integer[alloc.offset], Ra(alloc.reg)
                 );
             }
         }
@@ -69,7 +75,7 @@ impl RegAllocator {
         for alloc in self.allocations.iter_mut().filter_map(|x| x.take()) {
             if alloc.mutated {
                 dynasm!(ops
-                    ; mov stack => Integer[alloc.offset], Rq(alloc.reg)
+                    ; mov stack => Integer[alloc.offset], Ra(alloc.reg)
                 );
             }
         }
@@ -156,7 +162,7 @@ impl<'a> AllocationBuilder<'a> {
             if let Some(alloc) = alloc.take() {
                 if alloc.mutated {
                     dynasm!(self.assembler
-                        ; mov stack => Integer[alloc.offset], Rq(alloc.reg)
+                        ; mov stack => Integer[alloc.offset], Ra(alloc.reg)
                     );
                 }
             }
@@ -169,7 +175,7 @@ impl<'a> AllocationBuilder<'a> {
             // load it?
             let offset = if let Some(offset) = offset {
                 dynasm!(self.assembler
-                    ; mov Rq(reg_enc), stack => Integer[offset]
+                    ; mov Ra(reg_enc), stack => Integer[offset]
                 );
                 offset
             } else {

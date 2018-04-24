@@ -28,7 +28,7 @@ use label::Label;
 
 // re-export public api
 pub use core::Interpreter;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 pub use core::debug_compile;
 
 // This is here for visibility reasons

@@ -45,7 +45,7 @@ pub enum Command {
     InputNum
 }
 
-pub type Integer = i64;
+pub type Integer = isize;
 
 pub type BigInteger = BigInt;
 
