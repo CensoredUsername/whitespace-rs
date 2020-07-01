@@ -68,8 +68,8 @@ impl fmt::Display for Label {
         let len = self.buffer.len();
         if self.bits == 0 && len > 0 {
             if self.buffer[..len - 1].iter().all(|c| match *c {
-                b'a'...b'z'
-                | b'A'...b'Z'
+                b'a'..=b'z'
+                | b'A'..=b'Z'
                 | b'_' => true,
                 _ => false
             }) {

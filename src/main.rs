@@ -6,7 +6,7 @@ use std::io::{self, Write, Read, BufRead};
 use std::fs::File;
 use std::time::Instant;
 
-use whitespacers::{Program, Interpreter, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK, NO_IMPLICIT_EXIT, debug_compile};
+use whitespacers::{Program, Interpreter, Options, debug_compile};
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -51,7 +51,7 @@ fn main() {
     }
 }
 
-fn console_main() -> Result<(), Box<Error>> {
+fn console_main() -> Result<(), Box<dyn Error>> {
     let time_start = Instant::now();
 
     let args = parse_args()?;
@@ -74,7 +74,7 @@ fn console_main() -> Result<(), Box<Error>> {
 
     let time_parse = Instant::now();
 
-    let mut output: Box<Write> = if let Some(path) = args.output {
+    let mut output: Box<dyn Write> = if let Some(path) = args.output {
         Box::new(io::BufWriter::new(
             File::create(&path)?
         ))
@@ -100,7 +100,7 @@ fn console_main() -> Result<(), Box<Error>> {
             time_finish = Instant::now();
         },
         _ => {
-            let mut input: Box<BufRead> = if let Some(path) = args.input {
+            let mut input: Box<dyn BufRead> = if let Some(path) = args.input {
                 Box::new(io::BufReader::new(
                     File::open(&path)?
                 ))
@@ -239,25 +239,25 @@ fn parse_args() -> Result<Args, String> {
                         a => return Err(format!("Unrecognized strategy {}", a))
                     });
                 },
-                "--ignore-overflow" => if options.contains(IGNORE_OVERFLOW) {
+                "--ignore-overflow" => if options.contains(Options::IGNORE_OVERFLOW) {
                     return Err("Option --ignore-overflow was specified twice".to_string());
                 } else {
-                    options |= IGNORE_OVERFLOW;
+                    options |= Options::IGNORE_OVERFLOW;
                 },
-                "--unchecked-heap" => if options.contains(UNCHECKED_HEAP) {
+                "--unchecked-heap" => if options.contains(Options::UNCHECKED_HEAP) {
                     return Err("Option --unchecked-heap was specified twice".to_string());
                 } else {
-                    options |= UNCHECKED_HEAP;
+                    options |= Options::UNCHECKED_HEAP;
                 },
-                "--no-fallback" => if options.contains(NO_FALLBACK) {
+                "--no-fallback" => if options.contains(Options::NO_FALLBACK) {
                     return Err("Option --no-fallback was specified twice".to_string());
                 } else {
-                    options |= NO_FALLBACK;
+                    options |= Options::NO_FALLBACK;
                 },
-                "--no-implicit-exit" => if options.contains(NO_IMPLICIT_EXIT) {
+                "--no-implicit-exit" => if options.contains(Options::NO_IMPLICIT_EXIT) {
                     return Err("Option --no-implicit-exit was specified twice".to_string());
                 } else {
-                    options |= NO_IMPLICIT_EXIT;
+                    options |= Options::NO_IMPLICIT_EXIT;
                 },
                 "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE | -c] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback]
 

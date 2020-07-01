@@ -199,22 +199,22 @@ impl<'a> TokenizerState<'a> {
                     }
                     TokenType::Comment
                 },
-                'a'...'z' | 'A'...'Z' | '_' => {
+                'a'..='z' | 'A'..='Z' | '_' => {
                     loop {
                         match state.next() {
-                            Some('a'...'z') |
-                            Some('A'...'Z') |
+                            Some('a'..='z') |
+                            Some('A'..='Z') |
                             Some('_') |
-                            Some('0'...'9') => continue,
+                            Some('0'..='9') => continue,
                             _               => break
                         }
                     }
                     TokenType::Name {value: &source[start.0 .. state.index]}
                 },
-                '0'...'9' | '-' => {
+                '0'..='9' | '-' => {
                     loop {
                         match state.next() {
-                            Some('0'...'9') => continue,
+                            Some('0'..='9') => continue,
                             _               => break
                         }
                     }

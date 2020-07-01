@@ -13,12 +13,12 @@ pub struct BigIntState<'a> {
     stack: Vec<BigInteger>,
     heap:  HashMap<BigInteger, BigInteger>,
     callstack: Vec<usize>,
-    input: &'a mut (BufRead + 'a),
-    output: &'a mut (Write + 'a)
+    input: &'a mut (dyn BufRead + 'a),
+    output: &'a mut (dyn Write + 'a)
 }
 
 impl<'a> BigIntState<'a> {
-    pub fn new(options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> BigIntState<'a> {
+    pub fn new(options: Options, input: &'a mut (dyn BufRead + 'a), output: &'a mut (dyn Write + 'a)) -> BigIntState<'a> {
         BigIntState {
             options: options,
             index: 0,
@@ -35,8 +35,8 @@ impl<'a> BigIntState<'a> {
                            stack: Vec<BigInteger>,
                            heap: HashMap<BigInteger, BigInteger>,
                            callstack: Vec<usize>,
-                           input: &'a mut (BufRead + 'a),
-                           output: &'a mut (Write + 'a)) -> BigIntState<'a> {
+                           input: &'a mut (dyn BufRead + 'a),
+                           output: &'a mut (dyn Write + 'a)) -> BigIntState<'a> {
         BigIntState {
             options: options,
             index: index,
@@ -87,11 +87,11 @@ impl<'a> State<'a> for BigIntState<'a> {
         self.callstack.pop()
     }
 
-    fn input(&mut self) -> &mut BufRead {
+    fn input(&mut self) -> &mut dyn BufRead {
         self.input
     }
 
-    fn output(&mut self) -> &mut Write {
+    fn output(&mut self) -> &mut dyn Write {
         self.output
     }
 

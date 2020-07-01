@@ -26,14 +26,13 @@ path = "src/main.rs"
 
 
 [dependencies]
-itertools  = "0.*.*"
-crossbeam  = "0.*.*"
-fnv        = "1.*.*"
-bitflags   = "^0.9.1"
-num-bigint = "0.*.*"
-num-traits = "0.*.*"
-dynasm     = "^0.2.0"
-dynasmrt   = "^0.2.0"
+itertools  = "0.9"
+crossbeam  = "0.7"
+fnv        = "1"
+bitflags   = "1"
+num-bigint = "0.3"
+num-traits = "0.2"
+dynasmrt   = "0.7.1"
 
 [profile.release]
 debug = true

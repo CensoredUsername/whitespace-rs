@@ -10,7 +10,7 @@ use std::str::FromStr;
 use std::u8;
 
 use program::{Program, Command, Integer, BigInteger};
-use super::{WsError, WsErrorKind, Options, IGNORE_OVERFLOW, UNCHECKED_HEAP, NO_FALLBACK, NO_IMPLICIT_EXIT};
+use super::{WsError, WsErrorKind, Options};
 
 mod cached_map;
 
@@ -22,6 +22,27 @@ use self::jit_state::JitState;
 
 mod bigint_state;
 use self::bigint_state::BigIntState;
+
+
+#[cfg(target_arch="x86_64")]
+#[macro_use]
+mod compiler_x64;
+#[cfg(target_arch="x86")]
+#[macro_use]
+mod compiler_x86;
+
+#[cfg(target_arch="x86_64")]
+use self::compiler_x64::JitCompiler;
+#[cfg(target_arch="x86")]
+use self::compiler_x86::JitCompiler;
+
+#[cfg(target_arch="x86_64")]
+pub use self::compiler_x64::debug_compile;
+#[cfg(target_arch="x86")]
+pub use self::compiler_x86::debug_compile;
+
+#[cfg(any(target_arch="x86_64", target_arch="x86"))]
+mod allocator;
 
 
 pub trait CheckedArith : Sized + Clone + Default + Display + FromStr + ToString + From<isize> {
@@ -69,9 +90,9 @@ pub trait State<'a> {
     fn ret(&mut self) -> Option<usize>;
 
     /// access the input stream of the state
-    fn input(&mut self) -> &mut BufRead;
+    fn input(&mut self) -> &mut dyn BufRead;
     /// access the output stream of the state
-    fn output(&mut self) -> &mut Write;
+    fn output(&mut self) -> &mut dyn Write;
 
     /// perform input/output functions on the program state
     fn read_char(&mut self) -> Result<Self::Var, WsError> {
@@ -156,7 +177,7 @@ pub trait State<'a> {
                 Add => if len > 1 {
                     let stack = self.stack();
                     let (val, overflow) = stack[len - 2].overflowing_add(&stack[len - 1]);
-                    if overflow && !options.contains(IGNORE_OVERFLOW) {
+                    if overflow && !options.contains(Options::IGNORE_OVERFLOW) {
                         return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during addition: {} + {}", &stack[len - 2], &stack[len - 1])));
                     }
                     stack[len - 2] = val;
@@ -167,7 +188,7 @@ pub trait State<'a> {
                 Subtract => if len > 1 {
                     let stack = self.stack();
                     let (val, overflow) = stack[len - 2].overflowing_sub(&stack[len - 1]);
-                    if overflow && !options.contains(IGNORE_OVERFLOW) {
+                    if overflow && !options.contains(Options::IGNORE_OVERFLOW) {
                         return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during subtraction: {} - {}", &stack[len - 2], &stack[len - 1])));
                     }
                     stack[len - 2] = val;
@@ -178,7 +199,7 @@ pub trait State<'a> {
                 Multiply => if len > 1 {
                     let stack = self.stack();
                     let (val, overflow) = stack[len - 2].overflowing_mul(&stack[len - 1]);
-                    if overflow && !options.contains(IGNORE_OVERFLOW) {
+                    if overflow && !options.contains(Options::IGNORE_OVERFLOW) {
                         return Err(WsError::new(WsErrorKind::Overflow, format!("Overflow during multiplication: {} * {}", &stack[len - 2], &stack[len - 1])));
                     }
                     stack[len - 2] = val;
@@ -187,7 +208,7 @@ pub trait State<'a> {
                     return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to multiply"));
                 },
                 Divide => if len > 1 {
-                    let mut stack = self.stack();
+                    let stack = self.stack();
                     if let Some(val) = stack[len - 2].checked_div(&stack[len - 1]) {
                         stack[len - 2] = val;
                     } else if stack[len - 1].is_zero() {
@@ -200,7 +221,7 @@ pub trait State<'a> {
                     return Err(WsError::new(WsErrorKind::StackError, "Not enough items on stack to divide"));
                 },
                 Modulo => if len > 1 {
-                    let mut stack = self.stack();
+                    let stack = self.stack();
                     if let Some(val) = stack[len - 2].checked_rem(&stack[len - 1]) {
                         stack[len - 2] = val;
                     } else if stack[len - 1].is_zero() {
@@ -222,7 +243,7 @@ pub trait State<'a> {
                 Get => if let Some(last) = self.stack().pop() {
                     if let Some(value) = self.get(&last).cloned() {
                         self.stack().push(value);
-                    } else if options.contains(UNCHECKED_HEAP) {
+                    } else if options.contains(Options::UNCHECKED_HEAP) {
                         self.stack().push(Default::default());
                     } else {
                         let err = Err(WsError::new(WsErrorKind::KeyError, format!("Key does not exist on the heap: {}", &last)));
@@ -295,7 +316,7 @@ pub trait State<'a> {
             *self.index() += 1;
         }
 
-        if options.contains(NO_IMPLICIT_EXIT) {
+        if options.contains(Options::NO_IMPLICIT_EXIT) {
             Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
         } else {
             Ok(false)
@@ -395,13 +416,13 @@ impl CheckedArith for Integer {
 pub struct Interpreter<'a> {
     program: &'a Program,
     options: Options,
-    input: &'a mut (BufRead + 'a),
-    output: &'a mut (Write + 'a)
+    input: &'a mut (dyn BufRead + 'a),
+    output: &'a mut (dyn Write + 'a)
 }
 
 impl<'a> Interpreter<'a> {
     /// Construct a new whitespace interpreter from a program, input stream and output stream with the specified options.
-    pub fn new(program: &'a Program, options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> Interpreter<'a> {
+    pub fn new(program: &'a Program, options: Options, input: &'a mut (dyn BufRead + 'a), output: &'a mut (dyn Write + 'a)) -> Interpreter<'a> {
         Interpreter {
             program: program,
             options: options,
@@ -452,7 +473,7 @@ impl<'a> Interpreter<'a> {
         let mut state = SimpleState::new(self.options, &mut self.input, &mut self.output);
         match Self::interpret(&mut state, &self.program) {
             Ok(()) => Ok(()),
-            Err(e) => if self.options.contains(NO_FALLBACK) {
+            Err(e) => if self.options.contains(Options::NO_FALLBACK) {
                 Err(e)
             } else {
                 Self::bigint_fallback(&mut state, &self.program, e)
@@ -466,7 +487,7 @@ impl<'a> Interpreter<'a> {
         let mut state = JitState::new(self.options, &mut self.input, &mut self.output);
         match Self::interpret(&mut state, &self.program) {
             Ok(()) => Ok(()),
-            Err(e) => if self.options.contains(NO_FALLBACK) {
+            Err(e) => if self.options.contains(Options::NO_FALLBACK) {
                 Err(e)
             } else {
                 Self::bigint_fallback(&mut state, &self.program, e)
@@ -528,7 +549,7 @@ impl<'a> Interpreter<'a> {
             match state.interpret_block(&program.commands) {
                 Ok(true) => (),
                 Ok(false) => return Ok(()),
-                Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                Err(mut e) => if self.options.contains(Options::NO_FALLBACK) {
                     e.set_location(*state.index());
                     return Err(e)
                 } else { 
@@ -538,7 +559,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        if self.options.contains(NO_IMPLICIT_EXIT) {
+        if self.options.contains(Options::NO_IMPLICIT_EXIT) {
             Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
         } else {
             Ok(())
@@ -563,7 +584,7 @@ impl<'a> Interpreter<'a> {
         match state.interpret_block(&program.commands) {
             Ok(true) => (),
             Ok(false) => return Ok(()),
-            Err(mut e) => if self.options.contains(NO_FALLBACK) {
+            Err(mut e) => if self.options.contains(Options::NO_FALLBACK) {
                 e.set_location(*state.index());
                 return Err(e)
             } else {
@@ -573,7 +594,6 @@ impl<'a> Interpreter<'a> {
         }
 
         while let Some(&offset) = jit_handles.get(*state.index()) {
-
             // can we jit?
             if let Some(offset) = offset {
                 let old_index = *state.index();
@@ -607,7 +627,7 @@ impl<'a> Interpreter<'a> {
             match state.interpret_block(&program.commands) {
                 Ok(true) => (),
                 Ok(false) => return Ok(()),
-                Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                Err(mut e) => if self.options.contains(Options::NO_FALLBACK) {
                     e.set_location(*state.index());
                     return Err(e)
                 } else {
@@ -617,7 +637,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
-        if self.options.contains(NO_IMPLICIT_EXIT) {
+        if self.options.contains(Options::NO_IMPLICIT_EXIT) {
             Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
         } else {
             Ok(())
@@ -639,7 +659,7 @@ impl<'a> Interpreter<'a> {
             let executor = compiler.executor();
 
             // this thread compiles our code in the background.
-            scope.spawn(move || {
+            scope.spawn(move |_| {
                 use program::Command::*;
                 for (i, c) in compiler.commands.iter().enumerate() {
                     let i = match *c {
@@ -686,7 +706,7 @@ impl<'a> Interpreter<'a> {
                         drop(jit_finished_receive);
                         return Ok(())
                     },
-                    Err(mut e) => if self.options.contains(NO_FALLBACK) {
+                    Err(mut e) => if self.options.contains(Options::NO_FALLBACK) {
                         drop(jit_finished_receive);
                         e.set_location(*state.index());
                         return Err(e);
@@ -701,29 +721,11 @@ impl<'a> Interpreter<'a> {
             // drop the channel so the compilation thread will terminate soon
             drop(jit_finished_receive);
 
-            if self.options.contains(NO_IMPLICIT_EXIT) {
+            if self.options.contains(Options::NO_IMPLICIT_EXIT) {
                 Err(WsError::new(WsErrorKind::InvalidIndex, "Invalid program counter"))
             } else {
                 Ok(())
             }
-        })
+        }).unwrap()
     }
 }
-
-#[cfg(target_arch="x86_64")]
-mod compiler_x64;
-#[cfg(target_arch="x86")]
-mod compiler_x86;
-
-#[cfg(target_arch="x86_64")]
-use self::compiler_x64::JitCompiler;
-#[cfg(target_arch="x86")]
-use self::compiler_x86::JitCompiler;
-
-#[cfg(target_arch="x86_64")]
-pub use self::compiler_x64::debug_compile;
-#[cfg(target_arch="x86")]
-pub use self::compiler_x86::debug_compile;
-
-#[cfg(any(target_arch="x86_64", target_arch="x86"))]
-mod allocator;

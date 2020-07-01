@@ -4,7 +4,7 @@ use std::io::{BufRead, Write};
 
 use super::{State, SmallIntState};
 use ::program::{Integer, BigInteger};
-use ::{Options, IGNORE_OVERFLOW};
+use ::{Options};
 use super::bigint_state::BigIntState;
 use ::{WsError, WsErrorKind};
 
@@ -15,8 +15,8 @@ pub struct SimpleState<'a> {
     stack: Vec<Integer>,
     heap:  HashMap<Integer, Integer>,
     callstack: Vec<usize>,
-    input: &'a mut (BufRead + 'a),
-    output: &'a mut (Write + 'a)
+    input: &'a mut (dyn BufRead + 'a),
+    output: &'a mut (dyn Write + 'a)
 }
 
 impl<'a, 'b> State<'a> for SimpleState<'b> {
@@ -56,11 +56,11 @@ impl<'a, 'b> State<'a> for SimpleState<'b> {
         self.callstack.pop()
     }
 
-    fn input(&mut self) -> &mut BufRead {
+    fn input(&mut self) -> &mut dyn BufRead {
         self.input
     }
 
-    fn output(&mut self) -> &mut Write {
+    fn output(&mut self) -> &mut dyn Write {
         self.output
     }
 
@@ -78,7 +78,7 @@ impl<'a, 'b> State<'a> for SimpleState<'b> {
                 Ok(())
             },
             Err(e) => match s.parse::<BigInteger>() {
-                Ok(i) => if self.options.contains(IGNORE_OVERFLOW) {
+                Ok(i) => if self.options.contains(Options::IGNORE_OVERFLOW) {
                     Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Parsed number is outside arithmetic range"))
                 } else {
                     *self.index() += 1;
@@ -107,7 +107,7 @@ impl<'a, 'b> SmallIntState<'a> for SimpleState<'b> {
 }
 
 impl<'a> SimpleState<'a> {
-    pub fn new(options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> SimpleState<'a> {
+    pub fn new(options: Options, input: &'a mut (dyn BufRead + 'a), output: &'a mut (dyn Write + 'a)) -> SimpleState<'a> {
         SimpleState {
             options: options,
             count: 0,

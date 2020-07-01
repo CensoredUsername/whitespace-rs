@@ -6,7 +6,7 @@ use super::cached_map::{CachedMap, CacheEntry, Iter};
 use super::{State, SmallIntState};
 use super::bigint_state::BigIntState;
 use ::program::{Integer, BigInteger};
-use ::{Options, UNCHECKED_HEAP, IGNORE_OVERFLOW};
+use ::{Options};
 use ::{WsError, WsErrorKind};
 
 
@@ -43,12 +43,13 @@ pub struct JitState<'a> {
     pub heap_cache: *mut CacheEntry,
     stack: Vec<Integer>,
     pub stack_change: isize,
-    input: &'a mut (BufRead + 'a),
-    output: &'a mut (Write + 'a)
+    input: &'a mut (dyn BufRead + 'a),
+    output: &'a mut (dyn Write + 'a)
 }
 
+// For return locations we keep track of both the command index to return to, and a possible cached offset to jump to.
 #[derive(Debug, Clone, Copy)]
-struct RetLoc(usize, *const u8);
+struct RetLoc(usize, usize);
 
 impl<'a, 'b> State<'a> for JitState<'b> {
     type Var = Integer;
@@ -79,17 +80,17 @@ impl<'a, 'b> State<'a> for JitState<'b> {
     }
 
     fn call(&mut self, retloc: usize) {
-        self.callstack.push(RetLoc(retloc, ptr::null()));
+        self.callstack.push(RetLoc(retloc, 0));
     }
     fn ret(&mut self) -> Option<usize> {
         self.callstack.pop().map(|RetLoc(retloc, _)| retloc)
     }
 
-    fn input(&mut self) -> &mut BufRead {
+    fn input(&mut self) -> &mut dyn BufRead {
         self.input
     }
 
-    fn output(&mut self) -> &mut Write {
+    fn output(&mut self) -> &mut dyn Write {
         self.output
     }
 
@@ -103,7 +104,7 @@ impl<'a, 'b> State<'a> for JitState<'b> {
                 Ok(())
             },
             Err(e) => match s.parse::<BigInteger>() {
-                Ok(i) => if self.options.contains(IGNORE_OVERFLOW) {
+                Ok(i) => if self.options.contains(Options::IGNORE_OVERFLOW) {
                     Err(WsError::wrap(e, WsErrorKind::RuntimeParseError, "Parsed number is outside arithmetic range"))
                 } else {
                     *self.index() += 1;
@@ -132,7 +133,7 @@ impl<'a, 'b> SmallIntState<'a> for JitState<'b> {
 impl<'a> JitState<'a> {
     #![allow(dead_code)]
 
-    pub fn new(options: Options, input: &'a mut (BufRead + 'a), output: &'a mut (Write + 'a)) -> JitState<'a> {
+    pub fn new(options: Options, input: &'a mut (dyn BufRead + 'a), output: &'a mut (dyn Write + 'a)) -> JitState<'a> {
         let mut heap = CachedMap::new();
         let ptr  = heap.entries_mut().as_mut_ptr();
         JitState {
@@ -160,7 +161,7 @@ impl<'a> JitState<'a> {
         if let Some(&value) = (*state).heap.cache_bypass_get(*stack) {
             *stack = value;
             0
-        } else if (*state).options().contains(UNCHECKED_HEAP) {
+        } else if (*state).options().contains(Options::UNCHECKED_HEAP) {
             *stack = 0;
             0
         } else {
@@ -205,21 +206,21 @@ impl<'a> JitState<'a> {
         (*state).write_char(*stack).is_err() as u8
     });
 
-    pub_abi!(fn call(state: *mut JitState, _stack: *mut Integer, index: usize, retptr: *const u8) {
-        (*state).callstack.push(RetLoc(index, retptr));
+    pub_abi!(fn call(state: *mut JitState, _stack: *mut Integer, index: usize, retoffset: usize) {
+        (*state).callstack.push(RetLoc(index, retoffset));
     });
 
-    pub_abi!(fn ret(state: *mut JitState, _stack: *mut Integer, fail_index: usize, ret_index: *mut usize) -> *const u8 {
+    pub_abi!(fn ret(state: *mut JitState, _stack: *mut Integer, fail_index: usize, ret_index: *mut usize) -> usize {
         if let Some(RetLoc(index, block_ptr)) = (*state).callstack.pop() {
-            if block_ptr.is_null() {
+            if block_ptr == 0 {
                 *ret_index = index;
-                ptr::null()
+                0
             } else {
                 block_ptr
             }
         } else {
             *ret_index = fail_index;
-            ptr::null()
+            0
         }
     });
 
@@ -241,7 +242,7 @@ impl<'a> JitState<'a> {
             *stack_start = start;
             start.offset(len as isize)
         } else {
-            Self::reserve(state, mem::uninitialized(), max_stack, stack_start)
+            Self::reserve(state, 0, max_stack, stack_start)
         }
     });
 

@@ -5,6 +5,7 @@ use dynasmrt::x86::Assembler;
 use dynasmrt::DynasmApi;
 use ::program::Integer;
 
+
 const DYNAMIC_REGS: usize = 4;
 #[cfg(target_arch="x86_64")]
 const REG_ENCODINGS: &'static [u8; DYNAMIC_REGS] = &[8, 9, 10, 11];

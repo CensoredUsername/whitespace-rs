@@ -8,7 +8,7 @@ use std::cmp::{min, max};
 use super::cached_map::{CacheEntry, CACHE_MASK};
 
 use ::program::{Program, Command, Integer};
-use super::{Options, IGNORE_OVERFLOW, UNCHECKED_HEAP};
+use super::{Options};
 
 use super::jit_state::JitState;
 
@@ -52,13 +52,21 @@ pub fn debug_compile(program: &Program, options: Options) -> Vec<u8> {
 }
 
 // The used register allocation. This is here as allocator needs it
-dynasm!(ops
-    ; .alias state, ecx
-    ; .alias stack, edx // initialized after a call to get_stack
-    ; .alias retval, eax
-    ; .alias temp0, eax // eax is used as a general temp reg
-    // ebx, esi, edi and ebp are used as temp regs. Note that due to ebp's "specialness" we avoid using any of these in indirect addressing
-);
+
+// The used register allocation. This is here as allocator needs it
+macro_rules! dynasm {
+    ($ops:expr ; $($t:tt)*) => {
+        dynasmrt::dynasm!($ops
+            ; .arch x86
+            ; .alias state, ecx
+            ; .alias stack, edx // initialized after a call to get_stack
+            ; .alias retval, eax
+            ; .alias temp0, eax // eax is used as a general temp reg
+            // ebx, esi, edi and ebp are used as temp regs.
+            ; $($t)*
+        )
+    }
+}
 
 use super::allocator::RegAllocator;
 
@@ -136,7 +144,7 @@ pub struct JitBlock {
 
 impl<'a> JitCompiler<'a> {
     pub fn new(program: &'a Program, options: Options) -> JitCompiler<'a> {
-        let comp = JitCompiler {
+        let mut comp = JitCompiler {
             options: options,
             commands: &program.commands,
             blocks: HashMap::new(),
@@ -144,6 +152,11 @@ impl<'a> JitCompiler<'a> {
             fixup_queue: Vec::new(),
             ops: Assembler::new().unwrap()
         };
+
+        // we need something to calculate return offsets against
+        dynasm!(comp.ops
+            ;->buffer_base:
+        );
 
         comp
     }
@@ -232,7 +245,7 @@ impl<'a> JitCompiler<'a> {
                                 } else {
                                     dynasm!(self.ops; add Rd(left), value);
                                 }
-                                if !self.options.contains(IGNORE_OVERFLOW) {
+                                if !self.options.contains(Options::IGNORE_OVERFLOW) {
                                     dynasm!(self.ops
                                         ; jno >overflow
                                         ; sub Rd(left), value
@@ -256,7 +269,7 @@ impl<'a> JitCompiler<'a> {
                                 } else {
                                     dynasm!(self.ops; sub Rd(left), value);
                                 }
-                                if !self.options.contains(IGNORE_OVERFLOW) {
+                                if !self.options.contains(Options::IGNORE_OVERFLOW) {
                                     dynasm!(self.ops
                                         ; jno >overflow
                                         ; add Rd(left), value
@@ -271,7 +284,7 @@ impl<'a> JitCompiler<'a> {
                                 (0, 1)
                             },
                             Some(&Multiply) => {
-                                if !self.options.contains(IGNORE_OVERFLOW) {
+                                if !self.options.contains(Options::IGNORE_OVERFLOW) {
                                     let mut left = 0;
                                     let mut res = 0;
                                     allocator.stage(&mut self.ops).load(&mut left, offset).free(&mut res).finish();
@@ -366,7 +379,7 @@ impl<'a> JitCompiler<'a> {
                             ; add Rd(left), Rd(right)
                         );
 
-                        if !self.options.contains(IGNORE_OVERFLOW) {
+                        if !self.options.contains(Options::IGNORE_OVERFLOW) {
                             dynasm!(self.ops
                                 ; jno >overflow
                                 ; sub Rd(left), Rd(right)
@@ -387,7 +400,7 @@ impl<'a> JitCompiler<'a> {
                             ; sub Rd(left), Rd(right)
                         );
 
-                        if !self.options.contains(IGNORE_OVERFLOW) {
+                        if !self.options.contains(Options::IGNORE_OVERFLOW) {
                             dynasm!(self.ops
                                 ; jno >overflow
                                 ; add Rd(left), Rd(right)
@@ -401,7 +414,7 @@ impl<'a> JitCompiler<'a> {
                         (-1, 1)
                     },
                     Multiply => {
-                        if !self.options.contains(IGNORE_OVERFLOW) {
+                        if !self.options.contains(Options::IGNORE_OVERFLOW) {
                             let mut left = 0;
                             let mut right = 0;
                             let mut res = 0;
@@ -540,7 +553,7 @@ impl<'a> JitCompiler<'a> {
                             // not in cache
                             ;;call_extern!(self.ops, cache_bypass_get, offset, 0)
                         );
-                        if !self.options.contains(UNCHECKED_HEAP) {
+                        if !self.options.contains(Options::UNCHECKED_HEAP) {
                             dynasm!(self.ops
                                 ; test al, al
                                 ; jz BYTE >end
@@ -588,11 +601,13 @@ impl<'a> JitCompiler<'a> {
                         } else {
                             let start = self.ops.offset();
                             dynasm!(self.ops
-                                ; lea temp0, [0]
+                                ; lea temp0, [->buffer_base]
                             );
                             Self::add_fixup(&mut self.fixups, command_index + 1, FixUp::Lea(start, self.ops.offset()));
                         }
                         dynasm!(self.ops
+                            ; lea ebx, [->buffer_base]
+                            ; sub temp0, ebx
                             ; push temp0
                             ; push DWORD command_index as i32 + 1
                             ;; call_extern!(self.ops, call, offset, 2)
@@ -683,7 +698,9 @@ impl<'a> JitCompiler<'a> {
                             ;; call_extern!(self.ops, ret, offset, 2)
                             ; test retval, retval
                             ; jz >interpret
-                            ; jmp retval
+                            ; lea ebx, [->buffer_base]
+                            ; add ebx, retval
+                            ; jmp ebx
                             ;interpret:
                             ; mov retval, [esp + 0x8]
                             ;; epilogue!(self.ops)
@@ -764,7 +781,7 @@ impl<'a> JitCompiler<'a> {
     }
 
     pub fn commit(&mut self) {
-        self.ops.commit();
+        self.ops.commit().unwrap();
         
         if !self.fixup_queue.is_empty() {
             let fixup_queue = &mut self.fixup_queue;
@@ -789,7 +806,7 @@ impl<'a> JitCompiler<'a> {
                         }
                     }
                 }
-            });
+            }).unwrap();
         }
     }
 

@@ -1,5 +1,3 @@
-#![feature(plugin)]
-#![plugin(dynasm)]
 extern crate dynasmrt;
 extern crate itertools;
 extern crate crossbeam;
@@ -104,7 +102,7 @@ pub struct WsError {
     /// The kind of error that occurred.
     pub kind: WsErrorKind,
     location: Option<usize>,
-    cause: Option<Box<Error>>
+    cause: Option<Box<dyn Error>>
 }
 
 /// Simple information on what kind of error occurred.
@@ -200,14 +198,14 @@ impl Error for WsError {
         &self.message
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         self.cause.as_ref().map(|x| x.borrow())
     }
 }
 
 impl From<std::io::Error> for WsError {
     fn from(e: std::io::Error) -> WsError {
-        let description = e.description().to_string();
+        let description = e.to_string();
         WsError::wrap(e, WsErrorKind::ParseError(0, 0, 0), description)
     }
 }
