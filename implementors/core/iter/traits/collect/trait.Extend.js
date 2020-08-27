@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["whitespacers"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html\" title=\"trait core::iter::traits::collect::Extend\">Extend</a>&lt;<a class=\"struct\" href=\"whitespacers/struct.Options.html\" title=\"struct whitespacers::Options\">Options</a>&gt; for <a class=\"struct\" href=\"whitespacers/struct.Options.html\" title=\"struct whitespacers::Options\">Options</a>","synthetic":false,"types":["whitespacers::Options"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
