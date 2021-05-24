@@ -259,7 +259,7 @@ fn parse_args() -> Result<Args, String> {
                 } else {
                     options |= Options::NO_IMPLICIT_EXIT;
                 },
-                "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE | -c] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback]
+                "-h" | "--help" => return Err("Usage: whitespacers PROGRAM [-h | -i INFILE | -o OUTFILE | [-t | -e STRATEGY | -d DUMPFILE | -c] | -f FORMAT | -p | --ignore-overflow | --unchecked-heap | --no-fallback | --no-implicit-exit]
 
 wsc - A really fast whitespace JIT-compiler.
 
@@ -289,7 +289,7 @@ Options:
                              only actually execute a small part of their code.
         async|threaded      Similar to precompiled, but compiles code in a separate thread while
                              already interpreting. It is faster on large programs.
-    -d --count              Use the reference interpreter with no bignum fallback to count the amount
+    -c --count              Use the reference interpreter with no bignum fallback to count the amount
                              of instructions executed.
     -t --translate          Instead of executing, translate the file to/from assembly, and write
                              the result to the specified output.
@@ -310,7 +310,7 @@ Options:
                              this behaviour.
 
 Assembly format:
-    
+
 The assembly format used by wsc is very nasm-like. It supports the following instructions:
 
 Stack manipulation - push INTEGER, dup, swap, copy INTEGER, pop, slide INTEGER
