@@ -4,6 +4,7 @@ use std::env;
 use std::error::Error;
 use std::io::{self, Write, Read, BufRead};
 use std::fs::File;
+use std::process;
 use std::time::Instant;
 
 use whitespacers::{Program, Interpreter, Options, debug_compile};
@@ -45,10 +46,13 @@ enum Strategy {
 }
 
 fn main() {
-    match console_main() {
-        Ok(()) => (),
-        Err(s) => write!(io::stderr(), "Error: {}\n", s.to_string()).unwrap()
-    }
+    process::exit(match console_main() {
+        Ok(()) => 0,
+        Err(s) => {
+            eprintln!("Error: {}", s);
+            1
+        }
+    });
 }
 
 fn console_main() -> Result<(), Box<dyn Error>> {
