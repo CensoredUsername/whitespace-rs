@@ -318,7 +318,7 @@ fn number_to_ws(mut n: Integer) -> Vec<u8> {
     if n < 0 {
         n = -n;
         res.push(b'\t');
-    } else if n > 0{
+    } else {
         res.push(b' ');
     }
 
