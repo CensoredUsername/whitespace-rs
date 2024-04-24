@@ -154,8 +154,11 @@ pub trait State<'a> {
                 } else {
                     return Err(WsError::new(WsErrorKind::StackError, "Tried to duplicate but stack is empty"));
                 },
-                Copy {index} => if let Some(value) = self.stack().get(index).cloned() {
-                    self.stack().push(value);
+                Copy {index} => if index < self.stack().len() {
+                    let stack = self.stack();
+                    let index = stack.len() - 1 - index;
+                    let value = stack[index].clone();
+                    stack.push(value);
                 } else {
                     return Err(WsError::new(WsErrorKind::StackError, "Tried to copy from outside the stack"));
                 },

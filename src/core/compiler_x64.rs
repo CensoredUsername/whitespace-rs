@@ -327,21 +327,22 @@ impl<'a> JitCompiler<'a> {
                         (0, 2)
                     },
                     Copy {index} => {
-                        // have to spill everything as the copy can copy from loaded regs (and we can't check this at compile time)
+                        // load the source into a register, and move it to the top of the stack register.
+                        // this might result in an extra reg allocation and a move if the value of the source,
+                        // but the source might've also already been in a register.
+                        // mov's are basically free though.
+                        let mut src = 0;
                         let mut dest = 0;
-                        allocator.spill_keep(&mut self.ops);
-                        allocator.stage(&mut self.ops).free(&mut dest).finish();
-
+                        allocator.stage(&mut self.ops).load(&mut src, offset - index as i32).free(&mut dest).finish();
                         dynasm!(self.ops
-                            ; mov temp0, [rsp + 0x40]
-                            ; mov Rq(dest), temp0 => Integer[index as i32]
+                            ; mov Rq(dest), Rq(src)
                         );
-
                         allocator.set_offset(dest, offset + 1);
-                        // adjust min_stack if necessary
-                        let stack_depth_needed = stack_effect - index as i32;
-                        min_stack = min(stack_depth_needed, min_stack);
-                        (1, 1)
+
+                        // if index is 0, we need at least 1 item on the stack previously exisiting
+                        // etcetera. And another 1 is added as stack_extra is relative to the end
+                        // of the command stack effect
+                        (1, 2 + index as i32)
                     },
                     Discard => {
                         allocator.forget_offsets(|x| x == offset);

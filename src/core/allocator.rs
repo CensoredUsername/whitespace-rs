@@ -51,17 +51,6 @@ impl RegAllocator {
         }
     }
 
-    pub fn spill_keep(&mut self, ops: &mut Assembler) {
-        for alloc in self.allocations.iter_mut().filter_map(|x| x.as_mut()) {
-            if alloc.mutated {
-                dynasm!(ops
-                    ; mov stack => Integer[alloc.offset], Ra(alloc.reg)
-                );
-                alloc.mutated = false;
-            }
-        }
-    }
-
     pub fn spill_error(&mut self, ops: &mut Assembler) {
         for alloc in self.allocations.iter().filter_map(|x| x.as_ref()) {
             if alloc.mutated {
