@@ -36,6 +36,7 @@ pub struct Program {
     source: Option<Vec<u8>>,
     commands: Vec<Command>,
     locs: Option<Vec<SourceLoc>>,
+    #[allow(dead_code)]
     source_is_whitespace: bool
 }
 
@@ -80,6 +81,7 @@ impl Program {
 
 bitflags! {
     /// These are bitflag options to alter the behaviour of the interpreter.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct Options: u8 {
         /// Use wrapping arithmetric instead of detecting overflow and falling back
         const IGNORE_OVERFLOW    = 0b0000_0001;
