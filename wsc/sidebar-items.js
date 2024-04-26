@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["Action",""],["FileFormat",""],["Strategy",""]],"fn":[["console_main",""],["main",""],["parse_args",""]],"struct":[["Args",""]]});
+window.SIDEBAR_ITEMS = {"enum":["Action","FileFormat","Strategy"],"fn":["console_main","main","parse_args"],"macro":["try_opt"],"struct":["Args"]};
