@@ -218,10 +218,17 @@ impl<'a> TokenizerState<'a> {
                             _               => break
                         }
                     }
+                    let s = &source[start.0 .. state.index];
+                    if s == "-" {
+                        return Err(WsError::new(
+                            ParseError(state.line, state.column, state.index),
+                            "Expected digits"
+                        ))
+                    }
                     TokenType::Integer {
-                        value: if let Ok(value) = source[start.0 .. state.index].parse::<Integer>() {
+                        value: if let Ok(value) = s.parse::<Integer>() {
                             SizedInteger::Small(value)
-                        } else if let Ok(value) = source[start.0 .. state.index].parse::<BigInteger>() {
+                        } else if let Ok(value) = s.parse::<BigInteger>() {
                             SizedInteger::Big(value)
                         } else {
                             unreachable!()
