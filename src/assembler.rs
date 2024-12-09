@@ -159,13 +159,15 @@ impl<'a> TokenizerState<'a> {
         };
         state.next();
         loop {
-            let item;
             // consume whitespace
-            match state.item {
-                Some(' ') | Some('\t') => {state.next(); continue},
-                Some(c)                => item = c,
-                None                   => break
-            }
+            let item = match state.item {
+                Some(c) if c.is_ascii_whitespace() && c != '\n' => {
+                    state.next();
+                    continue;
+                },
+                Some(c) => c,
+                None    => break
+            };
             // match tokens
             // we can distinguish what token to match just on the starting symbol.
             let start = (state.index, state.line, state.column);
@@ -182,10 +184,8 @@ impl<'a> TokenizerState<'a> {
                     // skip ahead to the next non-whitespace so we don't emit a million newline tokens
                     loop {
                         match state.next() {
-                            Some('\n') |
-                            Some(' ')  |
-                            Some('\t') => continue,
-                            _          => break
+                            Some(c) if c.is_ascii_whitespace() => continue,
+                            _                                  => break
                         }
                     }
                     TokenType::Newline
@@ -218,10 +218,17 @@ impl<'a> TokenizerState<'a> {
                             _               => break
                         }
                     }
+                    let s = &source[start.0 .. state.index];
+                    if s == "-" {
+                        return Err(WsError::new(
+                            ParseError(state.line, state.column, state.index),
+                            "Expected digits"
+                        ))
+                    }
                     TokenType::Integer {
-                        value: if let Ok(value) = source[start.0 .. state.index].parse::<Integer>() {
+                        value: if let Ok(value) = s.parse::<Integer>() {
                             SizedInteger::Small(value)
-                        } else if let Ok(value) = source[start.0 .. state.index].parse::<BigInteger>() {
+                        } else if let Ok(value) = s.parse::<BigInteger>() {
                             SizedInteger::Big(value)
                         } else {
                             unreachable!()
