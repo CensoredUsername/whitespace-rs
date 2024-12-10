@@ -2,14 +2,14 @@ use std::str;
 use std::rc::Rc;
 use std::ops::Range;
 
-use program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
-use ::WsError;
-use ::WsErrorKind::ParseError;
+use crate::program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
+use crate::WsError;
+use crate::WsErrorKind::ParseError;
 
 impl Program {
     /// Disassemble a program into a human-readable whitespace assembly.
     pub fn disassemble(&self) -> String {
-        use program::Command::*;
+        use crate::program::Command::*;
 
         let mut buffer = String::new();
         for (index, command) in self.commands.iter().enumerate() {

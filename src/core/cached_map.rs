@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::collections::hash_map;
 use std::hash::BuildHasherDefault;
 
-use ::program::Integer;
+use crate::program::Integer;
 
 #[derive(Debug, Clone)]
 pub struct CachedMap {

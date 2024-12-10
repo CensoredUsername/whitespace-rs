@@ -7,7 +7,7 @@ use std::cmp::{min, max};
 
 use super::cached_map::{CacheEntry, CACHE_MASK};
 
-use ::program::{Program, Command, Integer};
+use crate::program::{Program, Command, Integer};
 use super::{Options};
 
 use super::jit_state::JitState;
@@ -23,7 +23,7 @@ pub fn debug_compile(program: &Program, options: Options) -> Vec<u8> {
     //     compiler.compile_index(0);
     // }
 
-    use program::Command::*;
+    use crate::program::Command::*;
     for (i, c) in program.commands.iter().enumerate() {
         let i = match *c {
             Label | Call {..} if i + 1 != program.commands.len() => i + 1,
@@ -128,21 +128,21 @@ impl<'a> JitCompiler<'a> {
         dynasm!(comp.ops
             ;->buffer_base:
             ;->cache_bypass_get:
-            ; .qword JitState::cache_bypass_get as _
+            ; .u64 JitState::cache_bypass_get as _
             ;->cache_evict:
-            ; .qword JitState::cache_evict as _
+            ; .u64 JitState::cache_evict as _
             ;->print_num:
-            ; .qword JitState::print_num as _
+            ; .u64 JitState::print_num as _
             ;->print_char:
-            ; .qword JitState::print_char as _
+            ; .u64 JitState::print_char as _
             ;->input_char:
-            ; .qword JitState::input_char as _
+            ; .u64 JitState::input_char as _
             ;->call:
-            ; .qword JitState::call as _
+            ; .u64 JitState::call as _
             ;->ret:
-            ; .qword JitState::ret as _
+            ; .u64 JitState::ret as _
             ;->get_stack:
-            ; .qword JitState::get_stack as _
+            ; .u64 JitState::get_stack as _
         );
 
         comp
@@ -150,7 +150,7 @@ impl<'a> JitCompiler<'a> {
 
     /// Compiles an extended basic block starting at command_index
     pub fn compile(&mut self, start_index: usize) -> Result<JitBlock, String> {
-        use program::Command::*;
+        use crate::Command::*;
 
         // stack effect calculation accumulators.
         // stack_effect will always be the change in stack BEFORE the op while the op is matched,

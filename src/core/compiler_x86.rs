@@ -7,7 +7,7 @@ use std::cmp::{min, max};
 
 use super::cached_map::{CacheEntry, CACHE_MASK};
 
-use ::program::{Program, Command, Integer};
+use crate::program::{Program, Command, Integer};
 use super::{Options};
 
 use super::jit_state::JitState;

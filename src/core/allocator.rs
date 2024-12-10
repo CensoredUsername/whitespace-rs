@@ -3,7 +3,7 @@ use dynasmrt::x64::Assembler;
 #[cfg(target_arch="x86")]
 use dynasmrt::x86::Assembler;
 use dynasmrt::DynasmApi;
-use ::program::Integer;
+use crate::program::Integer;
 
 
 const DYNAMIC_REGS: usize = 4;

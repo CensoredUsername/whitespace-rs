@@ -3,10 +3,10 @@ use std::collections::hash_map;
 use std::io::{BufRead, Write};
 
 use super::{State, SmallIntState};
-use ::program::{Integer, BigInteger};
-use ::{Options};
+use crate::program::{Integer, BigInteger};
+use crate::{Options};
 use super::bigint_state::BigIntState;
-use ::{WsError, WsErrorKind};
+use crate::{WsError, WsErrorKind};
 
 pub struct SimpleState<'a> {
     options: Options,

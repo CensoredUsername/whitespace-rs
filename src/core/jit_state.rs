@@ -5,9 +5,9 @@ use std::mem;
 use super::cached_map::{CachedMap, CacheEntry, Iter};
 use super::{State, SmallIntState};
 use super::bigint_state::BigIntState;
-use ::program::{Integer, BigInteger};
-use ::{Options};
-use ::{WsError, WsErrorKind};
+use crate::program::{Integer, BigInteger};
+use crate::{Options};
+use crate::{WsError, WsErrorKind};
 
 
 #[cfg(target_arch = "x86_64")]

@@ -4,9 +4,9 @@ use std::rc::Rc;
 use std::ops::Range;
 use std::collections::HashMap;
 
-use label::Label;
+use crate::label::Label;
 
-pub use ::Program;
+pub use crate::Program;
 
 #[derive(Debug, Clone)]
 pub struct SourceLoc {

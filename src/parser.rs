@@ -3,10 +3,10 @@ use num_bigint::Sign;
 use std::i64;
 use std::rc::Rc;
 
-use label::Label;
-use program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
-use ::WsError;
-use ::WsErrorKind::ParseError;
+use crate::label::Label;
+use crate::program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
+use crate::WsError;
+use crate::WsErrorKind::ParseError;
 
 #[derive(Debug, Clone)]
 struct ParseState<'a> {
@@ -272,7 +272,7 @@ impl Program {
     pub fn dump(&self) -> Vec<u8> {
         let mut buffer = Vec::<u8>::new();
 
-        use program::Command::*;
+        use crate::program::Command::*;
         for (index, command) in self.commands.iter().enumerate() {
             let label = self.locs.as_ref().and_then(|l| l[index].label.as_ref());
             let (code, arg): (&[u8], _) = match *command {

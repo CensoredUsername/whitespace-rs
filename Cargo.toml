@@ -12,6 +12,8 @@ readme = "README.md"
 keywords = ["whitespace", "wsc"]
 license = "MPL-2.0"
 
+edition = "2021"
+
 exclude = [
     "commit_docs.sh",
 ]
@@ -26,13 +28,13 @@ path = "src/main.rs"
 
 
 [dependencies]
-itertools  = "0.12.1"
+itertools  = "0.13.0"
 crossbeam  = "0.8.4"
 fnv        = "1.0.7"
-bitflags   = "2.5.0"
-num-bigint = "0.4.4"
-num-traits = "0.2.18"
-dynasmrt   = "2.0.0"
+bitflags   = "2.6.0"
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
+dynasmrt   = "3.0.1"
 
 [profile.release]
 debug = true

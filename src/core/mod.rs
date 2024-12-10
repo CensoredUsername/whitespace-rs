@@ -9,7 +9,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::u8;
 
-use program::{Program, Command, Integer, BigInteger};
+use crate::program::{Program, Command, Integer, BigInteger};
 use super::{WsError, WsErrorKind, Options};
 
 mod cached_map;
@@ -138,7 +138,7 @@ pub trait State<'a> {
     /// a control flow join is reached. The return value is false if the end
     /// of the program was reached
     fn interpret_block(&mut self, commands: &[Command]) -> Result<bool, WsError> {
-        use ::program::Command::*;
+        use crate::program::Command::*;
         let options = self.options();
 
         // interpret until we hit something that can cause a flow control convergence (jump, call, ret)
@@ -516,7 +516,7 @@ impl<'a> Interpreter<'a> {
         let mut jit_handles = vec![None; program.commands.len()];
 
         // first compile everything (except the starting block as there's no reason to do that)
-        use program::Command::*;
+        use crate::program::Command::*;
         for (i, c) in program.commands.iter().enumerate() {
             let i = match *c {
                 Label | Call {..} if i + 1 != program.commands.len() => i + 1,
@@ -663,7 +663,7 @@ impl<'a> Interpreter<'a> {
 
             // this thread compiles our code in the background.
             scope.spawn(move |_| {
-                use program::Command::*;
+                use crate::program::Command::*;
                 for (i, c) in compiler.commands.iter().enumerate() {
                     let i = match *c {
                         Label | Call {..} if i + 1 != compiler.commands.len() => i + 1,

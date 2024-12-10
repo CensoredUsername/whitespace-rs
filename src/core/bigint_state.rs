@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::collections::hash_map;
 use std::io::{BufRead, Write};
 
-use ::Options;
-use ::{WsError, WsErrorKind};
-use ::program::BigInteger;
+use crate::Options;
+use crate::{WsError, WsErrorKind};
+use crate::program::BigInteger;
 use super::State;
 
 pub struct BigIntState<'a> {
