@@ -88,9 +88,17 @@ impl fmt::Display for Label {
 
 impl<'a> From<&'a [u8]> for Label {
     fn from(buffer: &[u8]) -> Label {
-        let mut buffer = Vec::from(buffer);
-        buffer.push(0);
-        Label {bits: 0, buffer: buffer}
+        if buffer.starts_with(b"_") && buffer[1..].iter().all(|&x| x == b'1' || x == b'0') {
+            let mut label = Label::new();
+            for character in buffer[1..].iter() {
+                label.push(*character == b'1');
+            }
+            label
+        } else {
+            let mut buffer = Vec::from(buffer);
+            buffer.push(0);
+            Label {bits: 0, buffer: buffer}
+        }
     }
 }
 
