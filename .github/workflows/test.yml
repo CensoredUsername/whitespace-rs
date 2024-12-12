@@ -18,7 +18,7 @@ jobs:
           command: check
 
   test:
-    name: Test Suite
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -30,3 +30,26 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+
+  validate:
+    name: Run testcases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Test assembling
+        run: |
+          cargo run --release -- testcases/assembly_basic_instructions.wsa -t -f asm -o testcases/assembly_basic_instructions.2.ws
+          diff -u testcases/assembly_basic_instructions.ws testcases/assembly_basic_instructions.2.ws
+      - name: Test disassembling
+        run: |
+          cargo run --release -- testcases/assembly_basic_instructions.ws -t -f ws -o testcases/assembly_basic_instructions.2.wsa
+          diff -u testcases/assembly_basic_instructions.wsa testcases/assembly_basic_instructions.2.wsa
+      - name: Test running a known working whitespace program
+        run: |
+          cargo run --release -- testcases/big-quine.ws -o testcases/big-quine.2.ws
+          diff -u testcases/big-quine.ws testcases/big-quine.2.ws

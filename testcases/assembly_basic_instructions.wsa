@@ -1,0 +1,33 @@
+start:
+    push  0
+    push  1
+    push  99
+    push  -1
+    push  -99
+    dup
+    copy  1
+    swap
+    pop
+    slide 3
+    add
+    sub
+    mul
+    div
+    mod
+    set
+    get
+test:
+    call  test
+_11010110:
+    jmp   _11010110
+    jz    _11010110
+    jn    _11010110
+    ret
+    pchr
+    pnum
+    ichr
+    inum
+_0:
+_:
+_1:
+    exit
