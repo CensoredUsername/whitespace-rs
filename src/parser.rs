@@ -43,7 +43,7 @@ impl<'a> Iterator for ParseState<'a> {
 }
 
 impl<'a> ParseState<'a> {
-    fn new(buffer: &'a [u8]) -> ParseState {
+    fn new(buffer: &'a [u8]) -> ParseState<'a> {
         ParseState {line: 1, column: 1, index: 0, item: None, buffer: buffer}
     }
 
