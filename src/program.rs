@@ -1,5 +1,6 @@
 use num_bigint::BigInt;
 
+use std::cmp::Reverse;
 use std::rc::Rc;
 use std::ops::Range;
 use std::collections::HashMap;
@@ -73,7 +74,7 @@ impl Program {
         };
 
         // create an index => times_used map
-        let mut label_count = HashMap::new();
+        let mut label_count = HashMap::<usize, usize>::new();
         for (i, op) in self.commands.iter().enumerate() {
             match *op {
                 Command::Label => *label_count.entry(i + 1).or_insert(0) += 1,
@@ -85,9 +86,10 @@ impl Program {
             }
         }
 
-        // turn the map into a list of (index, times_used) that is sorted by times_used
+        // turn the map into a list of (index, times_used) that is sorted by times_used,
+        // breaking ties by earlier location
         let mut label_count: Vec<_> = label_count.into_iter().collect();
-        label_count.sort_by_key(|&(_, w)| w);
+        label_count.sort_by_key(|&(index, count)| (Reverse(count), index));
 
         // create an allocator that produces unique labels, starting from the smallest possible label
         let mut length = 0usize;
@@ -95,7 +97,7 @@ impl Program {
         let mut new_label = || {
             // create label
             let mut label = Label::new();
-            for i in 0..length {
+            for i in (0..length).rev() {
                 label.push(value & (1 << i) != 0);
             }
             // increment state
@@ -108,7 +110,7 @@ impl Program {
         };
 
         // from the sorted list, create a map of index => new_label
-        let label_map: HashMap<_, _> = label_count.iter().rev().map(|&(i, _)| (i, new_label())).collect();
+        let label_map: HashMap<_, _> = label_count.iter().map(|&(i, _)| (i, new_label())).collect();
 
         // and edit locs using them.
         for ((i, op), loc) in self.commands.iter().enumerate().zip(locs) {
