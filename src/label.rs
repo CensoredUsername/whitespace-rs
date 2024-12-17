@@ -66,16 +66,20 @@ impl Label {
 impl fmt::Display for Label {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let len = self.buffer.len();
-        if self.bits == 0 && len > 0 {
-            if self.buffer[..len - 1].iter().all(|c| match *c {
-                b'a'..=b'z'
-                | b'A'..=b'Z'
-                | b'_' => true,
-                _ => false
-            }) {
-                // as the above characters are all ascii we can safely convert to utf-8
-                return f.write_str(str::from_utf8(&self.buffer[..len - 1]).unwrap());
-            }
+        if self.bits == 0
+            && len > 0
+            && !matches!(self.buffer[0], b'0'..=b'9')
+            && self.buffer[..len - 1].iter().all(|c| {
+                matches!(*c,
+                    b'a'..=b'z'
+                    | b'A'..=b'Z'
+                    | b'0'..=b'9'
+                    | b'_'
+                )
+            })
+        {
+            // as the above characters are all ascii we can safely convert to utf-8
+            return f.write_str(str::from_utf8(&self.buffer[..len - 1]).unwrap());
         }
 
         f.write_char('_')?;
