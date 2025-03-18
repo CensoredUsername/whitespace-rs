@@ -1,6 +1,5 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src\program.rs`."><title>program.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-5bc39a1768837dd0.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="whitespacers" data-themes="" data-resource-suffix="" data-rustdoc-version="1.77.2 (25ef9e3d8 2024-04-09)" data-channel="1.77.2" data-search-js="search-dd67cee4cfa65049.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../static.files/storage-4c98445ec4002617.js"></script><script defer src="../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-48f368f3872407c8.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title">
-            <h2>Files</h2></div></nav><div class="sidebar-resizer"></div>
-    <main><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../../whitespacers/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src\program.rs`."><title>program.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="whitespacers" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0 (4d91de4e4 2025-02-17)" data-channel="1.85.0" data-search-js="search-75f5ac3e.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">whitespacers/</div>program.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -125,15 +124,17 @@
 <a href="#123" id="123">123</a>
 <a href="#124" id="124">124</a>
 <a href="#125" id="125">125</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span>num_bigint::BigInt;
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a></pre></div><pre class="rust"><code><span class="kw">use </span>num_bigint::BigInt;
 
+<span class="kw">use </span>std::cmp::Reverse;
 <span class="kw">use </span>std::rc::Rc;
 <span class="kw">use </span>std::ops::Range;
 <span class="kw">use </span>std::collections::HashMap;
 
-<span class="kw">use </span>label::Label;
+<span class="kw">use </span><span class="kw">crate</span>::label::Label;
 
-<span class="kw">pub use </span>::Program;
+<span class="kw">pub use </span><span class="kw">crate</span>::Program;
 
 <span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>SourceLoc {
@@ -200,7 +201,7 @@
         };
 
         <span class="comment">// create an index =&gt; times_used map
-        </span><span class="kw">let </span><span class="kw-2">mut </span>label_count = HashMap::new();
+        </span><span class="kw">let </span><span class="kw-2">mut </span>label_count = HashMap::&lt;usize, usize&gt;::new();
         <span class="kw">for </span>(i, op) <span class="kw">in </span><span class="self">self</span>.commands.iter().enumerate() {
             <span class="kw">match </span><span class="kw-2">*</span>op {
                 Command::Label =&gt; <span class="kw-2">*</span>label_count.entry(i + <span class="number">1</span>).or_insert(<span class="number">0</span>) += <span class="number">1</span>,
@@ -212,9 +213,10 @@
             }
         }
 
-        <span class="comment">// turn the map into a list of (index, times_used) that is sorted by times_used
+        <span class="comment">// turn the map into a list of (index, times_used) that is sorted by times_used,
+        // breaking ties by earlier location
         </span><span class="kw">let </span><span class="kw-2">mut </span>label_count: Vec&lt;<span class="kw">_</span>&gt; = label_count.into_iter().collect();
-        label_count.sort_by_key(|<span class="kw-2">&amp;</span>(<span class="kw">_</span>, w)| w);
+        label_count.sort_by_key(|<span class="kw-2">&amp;</span>(index, count)| (Reverse(count), index));
 
         <span class="comment">// create an allocator that produces unique labels, starting from the smallest possible label
         </span><span class="kw">let </span><span class="kw-2">mut </span>length = <span class="number">0usize</span>;
@@ -222,7 +224,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>new_label = || {
             <span class="comment">// create label
             </span><span class="kw">let </span><span class="kw-2">mut </span>label = Label::new();
-            <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..length {
+            <span class="kw">for </span>i <span class="kw">in </span>(<span class="number">0</span>..length).rev() {
                 label.push(value &amp; (<span class="number">1 </span>&lt;&lt; i) != <span class="number">0</span>);
             }
             <span class="comment">// increment state
@@ -235,7 +237,7 @@
         };
 
         <span class="comment">// from the sorted list, create a map of index =&gt; new_label
-        </span><span class="kw">let </span>label_map: HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt; = label_count.iter().rev().map(|<span class="kw-2">&amp;</span>(i, <span class="kw">_</span>)| (i, new_label())).collect();
+        </span><span class="kw">let </span>label_map: HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt; = label_count.iter().map(|<span class="kw-2">&amp;</span>(i, <span class="kw">_</span>)| (i, new_label())).collect();
 
         <span class="comment">// and edit locs using them.
         </span><span class="kw">for </span>((i, op), loc) <span class="kw">in </span><span class="self">self</span>.commands.iter().enumerate().zip(locs) {

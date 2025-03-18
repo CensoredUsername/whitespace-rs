@@ -1,6 +1,5 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src\assembler.rs`."><title>assembler.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-5bc39a1768837dd0.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="whitespacers" data-themes="" data-resource-suffix="" data-rustdoc-version="1.77.2 (25ef9e3d8 2024-04-09)" data-channel="1.77.2" data-search-js="search-dd67cee4cfa65049.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../static.files/storage-4c98445ec4002617.js"></script><script defer src="../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-48f368f3872407c8.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title">
-            <h2>Files</h2></div></nav><div class="sidebar-resizer"></div>
-    <main><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../../whitespacers/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src\assembler.rs`."><title>assembler.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-46132b98.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="whitespacers" data-themes="" data-resource-suffix="" data-rustdoc-version="1.85.0 (4d91de4e4 2025-02-17)" data-channel="1.85.0" data-search-js="search-75f5ac3e.js" data-settings-js="settings-0f613d39.js" ><script src="../../static.files/storage-59e33391.js"></script><script defer src="../../static.files/src-script-56102188.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5f194d8c.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">whitespacers/</div>assembler.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers">
+<a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -663,18 +662,24 @@
 <a href="#661" id="661">661</a>
 <a href="#662" id="662">662</a>
 <a href="#663" id="663">663</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span>std::str;
+<a href="#664" id="664">664</a>
+<a href="#665" id="665">665</a>
+<a href="#666" id="666">666</a>
+<a href="#667" id="667">667</a>
+<a href="#668" id="668">668</a>
+<a href="#669" id="669">669</a>
+<a href="#670" id="670">670</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::str;
 <span class="kw">use </span>std::rc::Rc;
 <span class="kw">use </span>std::ops::Range;
 
-<span class="kw">use </span>program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
-<span class="kw">use </span>::WsError;
-<span class="kw">use </span>::WsErrorKind::ParseError;
+<span class="kw">use </span><span class="kw">crate</span>::program::{Program, Command, Integer, BigInteger, SizedInteger, SourceLoc};
+<span class="kw">use </span><span class="kw">crate</span>::WsError;
+<span class="kw">use </span><span class="kw">crate</span>::WsErrorKind::ParseError;
 
 <span class="kw">impl </span>Program {
     <span class="doccomment">/// Disassemble a program into a human-readable whitespace assembly.
     </span><span class="kw">pub fn </span>disassemble(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; String {
-        <span class="kw">use </span>program::Command::<span class="kw-2">*</span>;
+        <span class="kw">use </span><span class="kw">crate</span>::program::Command::<span class="kw-2">*</span>;
 
         <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
         <span class="kw">for </span>(index, command) <span class="kw">in </span><span class="self">self</span>.commands.iter().enumerate() {
@@ -824,13 +829,15 @@
         </span>};
         state.next();
         <span class="kw">loop </span>{
-            <span class="kw">let </span>item;
             <span class="comment">// consume whitespace
-            </span><span class="kw">match </span>state.item {
-                <span class="prelude-val">Some</span>(<span class="string">' '</span>) | <span class="prelude-val">Some</span>(<span class="string">'\t'</span>) =&gt; {state.next(); <span class="kw">continue</span>},
-                <span class="prelude-val">Some</span>(c)                =&gt; item = c,
-                <span class="prelude-val">None                   </span>=&gt; <span class="kw">break
-            </span>}
+            </span><span class="kw">let </span>item = <span class="kw">match </span>state.item {
+                <span class="prelude-val">Some</span>(c) <span class="kw">if </span>c.is_ascii_whitespace() &amp;&amp; c != <span class="string">'\n' </span>=&gt; {
+                    state.next();
+                    <span class="kw">continue</span>;
+                },
+                <span class="prelude-val">Some</span>(c) =&gt; c,
+                <span class="prelude-val">None    </span>=&gt; <span class="kw">break
+            </span>};
             <span class="comment">// match tokens
             // we can distinguish what token to match just on the starting symbol.
             </span><span class="kw">let </span>start = (state.index, state.line, state.column);
@@ -847,10 +854,8 @@
                     <span class="comment">// skip ahead to the next non-whitespace so we don't emit a million newline tokens
                     </span><span class="kw">loop </span>{
                         <span class="kw">match </span>state.next() {
-                            <span class="prelude-val">Some</span>(<span class="string">'\n'</span>) |
-                            <span class="prelude-val">Some</span>(<span class="string">' '</span>)  |
-                            <span class="prelude-val">Some</span>(<span class="string">'\t'</span>) =&gt; <span class="kw">continue</span>,
-                            <span class="kw">_          </span>=&gt; <span class="kw">break
+                            <span class="prelude-val">Some</span>(c) <span class="kw">if </span>c.is_ascii_whitespace() =&gt; <span class="kw">continue</span>,
+                            <span class="kw">_                                  </span>=&gt; <span class="kw">break
                         </span>}
                     }
                     TokenType::Newline
@@ -883,10 +888,17 @@
                             <span class="kw">_               </span>=&gt; <span class="kw">break
                         </span>}
                     }
+                    <span class="kw">let </span>s = <span class="kw-2">&amp;</span>source[start.<span class="number">0 </span>.. state.index];
+                    <span class="kw">if </span>s == <span class="string">"-" </span>{
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(WsError::new(
+                            ParseError(state.line, state.column, state.index),
+                            <span class="string">"Expected digits"
+                        </span>))
+                    }
                     TokenType::Integer {
-                        value: <span class="kw">if let </span><span class="prelude-val">Ok</span>(value) = source[start.<span class="number">0 </span>.. state.index].parse::&lt;Integer&gt;() {
+                        value: <span class="kw">if let </span><span class="prelude-val">Ok</span>(value) = s.parse::&lt;Integer&gt;() {
                             SizedInteger::Small(value)
-                        } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(value) = source[start.<span class="number">0 </span>.. state.index].parse::&lt;BigInteger&gt;() {
+                        } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(value) = s.parse::&lt;BigInteger&gt;() {
                             SizedInteger::Big(value)
                         } <span class="kw">else </span>{
                             <span class="macro">unreachable!</span>()
@@ -956,7 +968,7 @@
     <span class="prelude-val">None
 </span>}
 
-<span class="macro">macro_rules! </span>parse {
+<span class="macro">macro_rules!</span> parse {
     (<span class="macro-nonterminal">$f</span>:ident, <span class="macro-nonterminal">$t</span>:ident) =&gt; (
         <span class="kw">match </span><span class="macro-nonterminal">$f</span>(<span class="macro-nonterminal">$t</span>) {
             ParseResult::Err(s) =&gt; <span class="kw">return </span>ParseResult::Err(s),
@@ -973,7 +985,7 @@
     );
 }
 
-<span class="macro">macro_rules! </span>token {
+<span class="macro">macro_rules!</span> token {
     (<span class="macro-nonterminal">$m</span>:pat) =&gt; (<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>Token {data: <span class="macro-nonterminal">$m</span>, ..}));
     (<span class="macro-nonterminal">$m</span>:pat, <span class="macro-nonterminal">$l</span>:ident) =&gt; (<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>Token {data: <span class="macro-nonterminal">$m</span>, loc: <span class="kw-2">ref </span><span class="macro-nonterminal">$l</span>}));
 }
@@ -1133,7 +1145,7 @@
  * Code below deals with compiling the AST in a program
  */
 
-</span><span class="macro">macro_rules! </span>validate_type {
+</span><span class="macro">macro_rules!</span> validate_type {
     (<span class="macro-nonterminal">$s</span>:expr, <span class="macro-nonterminal">$p</span>:pat =&gt; <span class="macro-nonterminal">$rv</span>:expr, <span class="macro-nonterminal">$a</span>:ident[<span class="macro-nonterminal">$i</span>:expr], <span class="macro-nonterminal">$loc</span>:expr) =&gt; (
         <span class="kw">if let </span><span class="macro-nonterminal">$p </span>= <span class="macro-nonterminal">$a</span>[<span class="macro-nonterminal">$i</span>].data {
             <span class="macro-nonterminal">$rv
